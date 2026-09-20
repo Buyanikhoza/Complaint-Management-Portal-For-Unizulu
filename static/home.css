@@ -1,0 +1,436 @@
+/* General page styling */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    color: #333;
+    background-color: #fff;
+}
+
+
+/* Navigation bar */
+
+.navbar {
+    background-color: white;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.nav-container {
+    max-width: 1200px;
+    margin: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 25px;
+}
+
+
+/* Logo section */
+
+.logo-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #003b6f;
+    font-weight: bold;
+}
+
+.logo-section img {
+    width: 65px;
+    height: auto;
+}
+
+.logo-section span {
+    font-size: 18px;
+}
+
+
+/* Navigation links */
+
+nav {
+    display: flex;
+    align-items: center;
+    gap: 25px;
+}
+
+nav a {
+    text-decoration: none;
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+nav a:hover {
+    color: #003b6f;
+}
+
+.nav-login {
+    background-color: #003b6f;
+    color: white !important;
+    padding: 10px 20px;
+    border-radius: 6px;
+}
+
+
+/* Hero section */
+
+.hero {
+    min-height: 600px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+
+    /* Background overlay with image */
+    background-image: 
+        linear-gradient(
+            rgba(0, 0, 0, 0.55),
+            rgba(0, 0, 0, 0.55)
+        ),
+        url("images/Admin.jpeg");
+    background-size: cover;
+    background-position: center 20%;
+    background-repeat: no-repeat;
+} /* Fixed: Closing brace added here */
+
+
+.hero-content {
+    max-width: 850px;
+    padding: 50px 25px;
+}
+
+
+.university-name {
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    margin-bottom: 15px;
+}
+
+
+.hero h1 {
+    color: white;
+    font-size: 46px;
+    line-height: 1.2;
+    margin-bottom: 25px;
+}
+
+
+.hero h1 span {
+    display: block;
+    color: #62a8e8;
+}
+
+
+.hero-text {
+    color: white;
+    font-size: 18px;
+    line-height: 1.7;
+    max-width: 700px;
+    margin: 0 auto 35px;
+}
+
+
+/* Hero buttons */
+
+.hero-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+
+.primary-button,
+.secondary-button {
+    display: inline-block;
+    padding: 14px 30px;
+    border-radius: 7px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+
+.primary-button {
+    background-color: #003b6f;
+    color: white;
+}
+
+
+.primary-button:hover {
+    background-color: #00284a;
+    transform: translateY(-2px);
+}
+
+
+.secondary-button {
+    background-color: white;
+    color: #003b6f;
+    border: 2px solid white;
+}
+
+
+.secondary-button:hover {
+    background-color: #eaf2f8;
+    transform: translateY(-2px);
+}
+
+
+/* General section styling */
+
+.section-container {
+    max-width: 1100px;
+    margin: auto;
+    padding: 70px 25px;
+    text-align: center;
+}
+
+
+.section-container h2 {
+    color: #003b6f;
+    font-size: 30px;
+    margin-bottom: 20px;
+}
+
+
+/* About section */
+
+.about {
+    background-color: white;
+}
+
+
+.about p {
+    max-width: 850px;
+    margin: 0 auto 15px;
+    color: #555;
+    font-size: 16px;
+    line-height: 1.7;
+}
+
+
+/* How it works */
+
+.how-it-works {
+    background-color: #f3f6f9;
+}
+
+
+.section-intro {
+    color: #666;
+    margin-bottom: 40px;
+}
+
+
+.steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 25px;
+}
+
+
+.step-card {
+    background-color: white;
+    padding: 35px 25px;
+    border-radius: 12px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
+}
+
+
+.step-number {
+    width: 50px;
+    height: 50px;
+    margin: 0 auto 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: #003b6f;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+
+.step-card h3 {
+    color: #003b6f;
+    margin-bottom: 12px;
+}
+
+
+.step-card p {
+    color: #666;
+    line-height: 1.6;
+}
+
+
+/* Features */
+
+.features {
+    background-color: white;
+}
+
+
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 25px;
+    margin-top: 35px;
+}
+
+
+.feature-card {
+    padding: 30px;
+    border: 1px solid #e0e5e9;
+    border-radius: 10px;
+    text-align: left;
+    transition: 0.3s;
+}
+
+
+.feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.10);
+}
+
+
+.feature-card h3 {
+    color: #003b6f;
+    margin-bottom: 10px;
+}
+
+
+.feature-card p {
+    color: #666;
+    line-height: 1.6;
+}
+
+
+/* Call to action */
+
+.cta {
+    background-color: #003b6f;
+    color: white;
+    text-align: center;
+}
+
+
+.cta h2 {
+    color: white;
+}
+
+
+.cta p {
+    margin-bottom: 25px;
+    line-height: 1.6;
+}
+
+
+.cta .primary-button {
+    background-color: white;
+    color: #003b6f;
+}
+
+
+.cta .primary-button:hover {
+    background-color: #eaf2f8;
+}
+
+
+/* Contact section */
+
+.contact {
+    background-color: #f3f6f9;
+}
+
+
+.contact p {
+    max-width: 700px;
+    margin: auto;
+    color: #666;
+    line-height: 1.7;
+}
+
+
+/* Footer */
+
+footer {
+    background-color: #00284a;
+    color: white;
+    text-align: center;
+    padding: 25px;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+
+/* Mobile responsiveness */
+
+@media (max-width: 768px) {
+
+    .nav-container {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    nav {
+        gap: 15px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .hero {
+        min-height: 550px;
+    }
+
+    .hero h1 {
+        font-size: 34px;
+    }
+
+    .hero-text {
+        font-size: 16px;
+    }
+
+    .steps {
+        grid-template-columns: 1fr;
+    }
+
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+@media (max-width: 480px) {
+
+    .logo-section span {
+        font-size: 16px;
+    }
+
+    nav a {
+        font-size: 13px;
+    }
+
+    .hero h1 {
+        font-size: 28px;
+    }
+
+    .section-container {
+        padding: 50px 20px;
+    }
+
+}

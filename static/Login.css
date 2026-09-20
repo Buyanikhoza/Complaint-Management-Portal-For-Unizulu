@@ -1,0 +1,148 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+
+    background-image:
+        linear-gradient(
+            rgba(0, 0, 0, 0.45),
+            rgba(0, 0, 0, 0.45)
+        ),
+        url("images/Admin.jpeg");
+
+    /* Fills the full screen without empty black bars */
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
+    
+    /* Removed background-attachment: fixed to prevent unnatural zooming */
+    min-height: 100vh;
+}
+
+.login-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 15px 20px;
+    box-sizing: border-box;
+}
+
+.university-logo {
+    width: 150px;
+    height: auto;
+    margin-bottom: 12px;
+    object-fit: contain;
+}
+
+.login-card {
+    width: 420px;
+    max-width: 92%;
+    background: rgba(255, 255, 255, 0.97);
+    padding: 25px 35px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.30);
+    text-align: center;
+    box-sizing: border-box;
+    border-top: 4px solid #003b6f;
+}
+
+.login-card h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+    color: #003b6f;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.login-card h2 {
+    margin: 0 0 15px;
+    font-size: 17px;
+    color: #003b6f;
+    line-height: 1.3;
+    font-weight: 600;
+}
+
+.welcome {
+    color: #666;
+    margin-bottom: 15px;
+    font-size: 14px;
+}
+
+.form-group {
+    text-align: left;
+    margin-bottom: 13px;
+}
+
+.form-group > label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #333;
+    font-size: 14px;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d0d7de;
+    border-radius: 7px;
+    box-sizing: border-box;
+    font-size: 14px;
+    background-color: #f8fafc;
+    transition: 0.3s;
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus {
+    outline: none;
+    background-color: white;
+    border-color: #003b6f;
+    box-shadow: 0 0 0 3px rgba(0, 59, 111, 0.12);
+}
+
+.radio-option {
+    display: inline-block !important;
+    margin-right: 12px;
+    font-weight: normal !important;
+    font-size: 14px;
+}
+
+.radio-option input {
+    margin-right: 4px;
+}
+
+button {
+    width: 100%;
+    padding: 11px;
+    border: none;
+    border-radius: 7px;
+    background: #003b6f;
+    color: white;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(0, 59, 111, 0.25);
+}
+
+button:hover {
+    background: #00284a;
+    box-shadow: 0 6px 13px rgba(0, 59, 111, 0.30);
+}
+
+.forgot-password {
+    margin-top: 12px;
+}
+
+.forgot-password a {
+    text-decoration: none;
+    color: #003b6f;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.forgot-password a:hover {
+    text-decoration: underline;
+}

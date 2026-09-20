@@ -119,12 +119,12 @@ complaints_db = [
 
 online_users = {}
 
-EMAIL_HOST = os.getenv('EMAIL_HOST')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.office365.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
-EMAIL_USERNAME = os.getenv('EMAIL_USERNAME')
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+EMAIL_USERNAME = (os.getenv('EMAIL_USERNAME') or '').strip() or None
+EMAIL_PASSWORD = (os.getenv('EMAIL_PASSWORD') or '').strip() or None
 EMAIL_FROM = os.getenv('EMAIL_FROM', 'no-reply@unizulu.ac.za')
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+EMAIL_USE_TLS = str(os.getenv('EMAIL_USE_TLS', 'true')).lower() == 'true'
 
 
 def get_user_email(username, role='student'):
@@ -135,13 +135,19 @@ def get_user_email(username, role='student'):
         student_number = str(username).strip()
         if student_number.isdigit() and len(student_number) == 9:
             return f'{student_number}@stu.unizulu.ac.za'
-        return f'{student_number}@stu.unizulu.ac.za'
+        if student_number and student_number != 'None':
+            return f'{student_number}@stu.unizulu.ac.za'
+        return None
     return 'support@unizulu.ac.za'
 
 
 def send_email_notification(subject, body, recipients):
     recipients = [email for email in recipients if email]
-    if not recipients or not EMAIL_HOST or not EMAIL_USERNAME or not EMAIL_PASSWORD:
+    if not recipients:
+        print('Email notification skipped: no recipients provided.')
+        return False
+    if not EMAIL_HOST or not EMAIL_USERNAME or not EMAIL_PASSWORD:
+        print('Email notification skipped: Outlook SMTP credentials not configured. Set EMAIL_HOST, EMAIL_USERNAME, and EMAIL_PASSWORD.')
         return False
 
     message = EmailMessage()
@@ -162,6 +168,24 @@ def send_email_notification(subject, body, recipients):
         return False
 
 
+def send_student_confirmation_email(complaint):
+    student_email = get_user_email(complaint.get('username'), complaint.get('role', 'student'))
+    if not student_email:
+        return False
+
+    subject = f'Confirmation of complaint submission: {complaint.get("reference_number")}'
+    body = (
+        f"Hello {complaint.get('full_name')},\n\n"
+        f"Your grievance has been submitted successfully.\n"
+        f"Reference Number: {complaint.get('reference_number')}\n"
+        f"Category: {complaint.get('category')}\n"
+        f"Status: {complaint.get('status')}\n"
+        f"Description: {complaint.get('description')}\n\n"
+        f"Our staff will review your complaint and provide updates as needed."
+    )
+    return send_email_notification(subject, body, [student_email])
+
+
 def send_complaint_notification(complaint):
     student_email = get_user_email(complaint.get('username'), complaint.get('role', 'student'))
     staff_emails = [
@@ -170,9 +194,8 @@ def send_complaint_notification(complaint):
         if data.get('role') in {'staff', 'admin'}
     ]
 
-    recipients = [email for email in [student_email] + staff_emails if email]
-    subject = f'New grievance submitted: {complaint.get("reference_number")}'
-    body = (
+    staff_subject = f'New grievance submitted: {complaint.get("reference_number")}'
+    staff_body = (
         f"Hello,\n\nA new grievance has been submitted.\n"
         f"Reference Number: {complaint.get('reference_number')}\n"
         f"Student: {complaint.get('full_name')}\n"
@@ -181,7 +204,10 @@ def send_complaint_notification(complaint):
         f"Description: {complaint.get('description')}\n\n"
         f"Please log in to the grievance portal to review or update it."
     )
-    return send_email_notification(subject, body, recipients)
+
+    staff_sent = send_email_notification(staff_subject, staff_body, [email for email in staff_emails if email])
+    confirmation_sent = send_student_confirmation_email(complaint)
+    return staff_sent or confirmation_sent or bool(student_email)
 
 
 def send_status_update_notification(complaint, old_status, new_status):

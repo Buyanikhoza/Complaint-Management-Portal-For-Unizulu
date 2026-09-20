@@ -183,6 +183,37 @@ def test_submit_grievance_sends_email_notification(monkeypatch):
     assert any('@unizulu.ac.za' in email for email in sent['recipients'])
 
 
+def test_submission_confirmation_email_contains_reference_number(monkeypatch):
+    sent = {}
+
+    def fake_send(subject, body, recipients):
+        sent['subject'] = subject
+        sent['body'] = body
+        sent['recipients'] = recipients
+        return True
+
+    monkeypatch.setattr('app.send_email_notification', fake_send)
+
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session['username'] = 'student1'
+        session['full_name'] = 'Sbusiso Nkomo'
+        session['role'] = 'student'
+
+    response = client.post(
+        '/submit_grievance',
+        data={'description': 'Confirmation email test grievance', 'category': 'ICT'},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert 'subject' in sent
+    assert 'Confirmation' in sent['subject']
+    assert 'student1@unizulu.ac.za' in sent['recipients']
+    assert 'Reference Number' in sent['body']
+    assert 'GRV-' in sent['body']
+
+
 def test_status_update_sends_student_email_notification(monkeypatch):
     sent = {}
 

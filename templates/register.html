@@ -33,17 +33,18 @@
 
         <form action="{{ url_for('register') }}" method="POST">
             <div class="form-group">
-                <label>Full Name</label>
-                <input type="text" name="full_name" required placeholder="John Doe">
+                <label>Full Name and Surname</label>
+                <input type="text" name="full_name" required placeholder="Enter your name and surname">
             </div>
             <div class="form-group">
-                <label>Username / Student ID</label>
-                <input type="text" name="username" required placeholder="202100000" pattern="[0-9]{9}" title="Student number must be exactly 9 digits."
+                <label>Staff / Student ID</label>
+                <input type="text" name="username" required placeholder="Enter your nine digits staff/student ID" pattern="[0-9]{9}" title="Student or staff ID must be exactly 9 digits."
                     inputmode="numeric">
             </div>
             <div class="form-group">
                 <label>Account Type</label>
-                <select name="role">
+                <select name="role" required>
+                    <option value="" selected disabled>Select Role</option>
                     <option value="student">Student</option>
                     <option value="staff">Staff</option>
                     <option value="admin">System Administrator</option>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Track Status</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 20px; }
+        .page { max-width: 900px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; background-color: #003366; color: white; padding: 15px 20px; border-radius: 6px; }
+        .nav { display: flex; gap: 12px; align-items: center; }
+        .nav a, .logout { color: white; background: #d9534f; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-weight: bold; }
+        .nav a.primary { background: #0057b8; }
+        .card { margin-top: 20px; background: white; padding: 24px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .status-box { background: #edf6ff; border-left: 6px solid #003366; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px; }
+        .status-box strong { color: #003366; }
+        .track-status-grid { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .track-status-grid input { flex: 1; min-width: 220px; padding: 10px; border: 1px solid #cfd8ea; border-radius: 6px; }
+        .btn { background: #003366; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; }
+        .status-result { margin-top: 14px; background: #f8fafc; border: 1px solid #dfe9f7; border-radius: 8px; padding: 12px 14px; color: #163d66; }
+        .status-result.error { color: #9b1c1c; background: #fff4f4; border-color: #f2c7c7; }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <header>
+            <h2>Track Complaint Status</h2>
+            <div class="nav">
+                <a href="{{ url_for('student_dashboard') }}" class="primary">Back to Dashboard</a>
+                <a href="{{ url_for('logout') }}" class="logout">Logout</a>
+            </div>
+        </header>
+
+        <div class="card">
+            {% if latest_reference %}
+            <div class="status-box">
+                <strong>Latest reference number:</strong> {{ latest_reference }}
+            </div>
+            {% endif %}
+
+            <div class="track-status-grid">
+                <input id="status-reference" type="text" placeholder="Enter complaint reference number" aria-label="Complaint reference number" />
+                <button id="status-check-btn" type="button" class="btn">Check Status</button>
+            </div>
+            <p style="margin: 10px 0 0; color: #5b6b82; font-size: 14px;">
+                Enter the grievance reference number you received after submitting your complaint.
+            </p>
+            <div id="track-status-result" class="status-result">Enter a reference number to see the complaint status.</div>
+        </div>
+    </div>
+
+    <script>
+        const statusInput = document.getElementById('status-reference');
+        const statusResult = document.getElementById('track-status-result');
+        const statusCheckBtn = document.getElementById('status-check-btn');
+
+        async function checkComplaintStatus() {
+            const referenceNumber = (statusInput.value || '').trim();
+            if (!referenceNumber) {
+                statusResult.textContent = 'Please enter a reference number to track the complaint.';
+                statusResult.classList.add('error');
+                return;
+            }
+
+            statusResult.textContent = 'Checking status...';
+            statusResult.classList.remove('error');
+
+            try {
+                const response = await fetch('/complaint_status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reference_number: referenceNumber })
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Reference number not found.');
+                }
+
+                statusResult.innerHTML = '<strong>Reference:</strong> ' + data.reference_number + '<br>' +
+                    '<strong>Status:</strong> ' + data.status + '<br>' +
+                    '<strong>Category:</strong> ' + data.category + '<br>' +
+                    '<strong>Submitted:</strong> ' + data.created_at;
+            } catch (error) {
+                statusResult.textContent = error.message || 'Unable to find this complaint.';
+                statusResult.classList.add('error');
+            }
+        }
+
+        statusCheckBtn.addEventListener('click', checkComplaintStatus);
+        statusInput.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                checkComplaintStatus();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,6 +1,23 @@
+import io
+
 import pytest
 
 from app import app
+
+
+def test_load_environment_file_reads_dotenv_without_python_dotenv(tmp_path, monkeypatch):
+    env_file = tmp_path / '.env'
+    env_file.write_text('EMAIL_USERNAME=test@gmail.com\nEMAIL_PASSWORD=secret\nEMAIL_FROM=sender@gmail.com\n', encoding='utf-8')
+
+    monkeypatch.chdir(tmp_path)
+
+    import app as app_module
+
+    app_module.load_environment_file(str(env_file))
+
+    assert app_module.os.environ.get('EMAIL_USERNAME') == 'test@gmail.com'
+    assert app_module.os.environ.get('EMAIL_PASSWORD') == 'secret'
+    assert app_module.os.environ.get('EMAIL_FROM') == 'sender@gmail.com'
 
 
 @pytest.fixture
@@ -24,13 +41,48 @@ def test_home_page_route_exists():
 def test_student_submission_shows_reference_number(client):
     response = client.post(
         '/submit_grievance',
-        data={'description': 'WiFi is failing in the hostel', 'category': 'IT / Network'},
+        data={
+            'description': 'WiFi is failing in the hostel',
+            'category': 'IT / Network',
+            'evidence': (io.BytesIO(b'fake evidence'), 'evidence.pdf'),
+        },
         follow_redirects=True,
     )
 
     assert response.status_code == 200
     assert b'Reference number' in response.data
     assert b'GRV-' in response.data
+
+
+def test_student_can_withdraw_pending_grievance(client):
+    from app import complaints_db
+
+    complaints_db.append({
+        'id': 9997,
+        'full_name': 'Sbusiso Nkomo',
+        'username': 'student1',
+        'description': 'Withdraw me',
+        'category': 'ICT',
+        'status': 'Pending',
+        'created_at': '2026-09-23',
+        'reference_number': 'GRV-20260923-9997',
+        'is_anonymous': False,
+        'evidence_path': None,
+    })
+    import app as app_module
+    app_module.persist_state()
+
+    try:
+        response = client.post('/withdraw_grievance/9997', follow_redirects=True)
+
+        assert response.status_code == 200
+        assert b'withdrawn' in response.data.lower()
+        assert b'GRV-20260923-9997' in response.data
+        complaint = next(item for item in complaints_db if item['id'] == 9997)
+        assert complaint['status'] == 'Withdrawn'
+    finally:
+        complaints_db[:] = [item for item in complaints_db if item.get('id') != 9997]
+        app_module.persist_state()
 
 
 def test_student_dashboard_lists_reference_numbers(client):
@@ -40,6 +92,19 @@ def test_student_dashboard_lists_reference_numbers(client):
     assert b'Reference Number' in response.data
 
 
+def test_student_submission_requires_evidence_and_shows_rejection_warning(client):
+    response = client.post(
+        '/submit_grievance',
+        data={'description': 'WiFi is failing in the hostel', 'category': 'ICT'},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b'evidence' in response.data.lower()
+    assert b'rejection' in response.data.lower()
+    assert b'Grievance submission failed' in response.data
+
+
 def test_student_dashboard_bot_prompts_for_reference_and_evidence(client):
     response = client.get('/student_dashboard')
 
@@ -47,7 +112,45 @@ def test_student_dashboard_bot_prompts_for_reference_and_evidence(client):
     html = response.get_data(as_text=True)
     assert 'Please send your reference number, for example GRV-20260908-0001' in html
     assert 'Do you want to upload a supporting document? Reply with Yes or No.' in html
-    assert 'Academic, ICT, Finance, NSFAS, Facilities / Housing, or General' in html
+    assert 'Academic, ICT, Finance, Facilities / Housing, or General' in html
+
+
+def test_student_dashboard_has_track_status_button_and_pane(client):
+    response = client.get('/student_dashboard')
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'Track Status' in html
+    assert '/track_status' in html
+
+    status_page = client.get('/track_status')
+    assert status_page.status_code == 200
+    status_html = status_page.get_data(as_text=True)
+    assert 'Check Status' in status_html
+    assert 'Back to Dashboard' in status_html
+
+
+def test_student_dashboard_chatbot_asks_about_anonymous_submission(client):
+    response = client.get('/student_dashboard')
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'Do you want to submit this complaint anonymously? Reply with Yes or No.' in html
+
+
+def test_student_track_status_button_navigates_to_separate_page(client):
+    response = client.get('/student_dashboard')
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert '/track_status' in html
+
+    status_page = client.get('/track_status')
+    assert status_page.status_code == 200
+    status_html = status_page.get_data(as_text=True)
+    assert b'Track Status' in status_page.data
+    assert 'Enter complaint reference number' in status_html
+    assert 'placeholder="Enter complaint reference number"' in status_html
 
 
 def test_student_can_check_status_by_reference_number(client):
@@ -63,6 +166,28 @@ def test_student_can_check_status_by_reference_number(client):
     post_data = post_response.get_json()
     assert post_data['reference_number'] == 'GRV-20260908-0001'
     assert post_data['status'] == 'Pending'
+
+
+def test_login_requires_role_selection_and_student_dashboard_has_blank_default_category():
+    login_response = app.test_client().get('/login')
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session['username'] = 'student1'
+        session['full_name'] = 'Sbusiso Nkomo'
+        session['role'] = 'student'
+    student_dashboard_response = client.get('/student_dashboard')
+
+    assert login_response.status_code == 200
+    login_html = login_response.get_data(as_text=True)
+    assert 'Select Role' in login_html
+    assert 'Student' in login_html
+    assert b'NSFAS' not in login_html.encode('utf-8')
+
+    assert student_dashboard_response.status_code == 200
+    dashboard_html = student_dashboard_response.get_data(as_text=True)
+    assert 'Select Category' in dashboard_html
+    assert 'Academic' in dashboard_html
+    assert 'NSFAS' not in dashboard_html
 
 
 def test_admin_options_are_available_in_login_and_register():
@@ -87,6 +212,52 @@ def test_admin_login_redirects_to_administrator_dashboard():
     assert b'System Administration Control Panel' in response.data
 
 
+def test_staff_login_requires_department_and_filters_complaints():
+    client = app.test_client()
+    complaints_db = __import__('app').complaints_db
+    complaints_db[:] = [
+        {
+            'id': 9998,
+            'full_name': 'Academic Student',
+            'username': 'student99',
+            'description': 'Academic issue for staff view',
+            'category': 'Academic',
+            'status': 'Pending',
+            'created_at': '2026-09-10',
+            'reference_number': 'GRV-20260910-9998',
+            'is_anonymous': False,
+            'evidence_path': None,
+            'department': 'Academic Affairs',
+        },
+        {
+            'id': 9999,
+            'full_name': 'IT Student',
+            'username': 'student98',
+            'description': 'IT issue not for academic staff',
+            'category': 'ICT',
+            'status': 'Pending',
+            'created_at': '2026-09-10',
+            'reference_number': 'GRV-20260910-9999',
+            'is_anonymous': False,
+            'evidence_path': None,
+            'department': 'IT Services',
+        },
+    ]
+
+    try:
+        response = client.post(
+            '/login',
+            data={'username': 'staff1', 'password': '123', 'role': 'staff', 'department': 'Academic Affairs'},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert 'Academic issue for staff view' in html
+        assert 'IT issue not for academic staff' not in html
+    finally:
+        complaints_db[:] = [entry for entry in complaints_db if entry.get('id') not in {9998, 9999}]
+
+
 def test_admin_can_manage_users_departments_and_categories():
     client = app.test_client()
     with client.session_transaction() as session:
@@ -109,6 +280,59 @@ def test_admin_can_manage_users_departments_and_categories():
     category_response = client.post('/administrator/add_category', data={'category': 'Admissions'}, follow_redirects=True)
     assert category_response.status_code == 200
     assert b'Admissions' in category_response.data
+
+    remove_user_response = client.post('/administrator/remove_user/admin_student', follow_redirects=True)
+    assert remove_user_response.status_code == 200
+    assert b'removed' in remove_user_response.data.lower()
+
+    remove_department_response = client.post('/administrator/remove_department/Psychology', follow_redirects=True)
+    assert remove_department_response.status_code == 200
+    assert b'removed' in remove_department_response.data.lower()
+
+    remove_category_response = client.post('/administrator/remove_category/Admissions', follow_redirects=True)
+    assert remove_category_response.status_code == 200
+    assert b'removed' in remove_category_response.data.lower()
+
+
+def test_admin_generate_report_downloads_excel_workbook_with_charts_and_tables():
+    client = app.test_client()
+    complaints_db = __import__('app').complaints_db
+    complaints_db.insert(0, {
+        'id': 2026,
+        'full_name': 'Sample Student',
+        'username': 'student99',
+        'description': 'Sample complaint for report generation',
+        'category': 'ICT',
+        'department': 'IT Services',
+        'status': 'Pending',
+        'created_at': '2026-09-23',
+        'reference_number': 'GRV-20260923-0001',
+        'is_anonymous': False,
+        'evidence_path': None,
+    })
+
+    try:
+        with client.session_transaction() as session:
+            session['username'] = 'admin1'
+            session['full_name'] = 'System Administrator'
+            session['role'] = 'admin'
+
+        response = client.get('/administrator/generate_report')
+
+        assert response.status_code == 200
+        assert response.headers['Content-Type'].startswith('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        assert 'attachment; filename=' in response.headers.get('Content-Disposition', '')
+
+        workbook = __import__('openpyxl').load_workbook(filename=__import__('io').BytesIO(response.data), read_only=True)
+        assert 'Summary' in workbook.sheetnames
+        assert 'Category Breakdown' in workbook.sheetnames
+        assert 'Detailed Complaints' in workbook.sheetnames
+        assert workbook['Summary']['A1'].value == 'Grievance Report'
+        assert workbook['Summary']['A7'].value == 'Status'
+        assert workbook['Detailed Complaints']['A1'].value == 'Reference Number'
+        assert workbook['Detailed Complaints']['A2'].value == 'GRV-20260923-0001'
+    finally:
+        complaints_db[:] = [entry for entry in complaints_db if entry.get('id') != 2026]
 
 
 def test_admin_report_analytics_are_visible():
@@ -154,6 +378,48 @@ def test_admin_can_see_who_is_online():
         online_users.clear()
 
 
+def test_state_persists_across_reload(monkeypatch, tmp_path):
+    import json
+    import importlib
+    import app as app_module
+
+    monkeypatch.setenv('PORTAL_STATE_FILE', str(tmp_path / 'portal_state.json'))
+    app_module.DATA_FILE = str(tmp_path / 'portal_state.json')
+    app_module.app.config['TESTING'] = False
+    app_module.users_db['student_reload'] = {
+        'password': '123',
+        'full_name': 'Reload Student',
+        'role': 'student',
+        'department': 'IT Services',
+        'email': 'reload@unizulu.ac.za',
+    }
+    app_module.complaints_db.append({
+        'id': 901,
+        'full_name': 'Reload Student',
+        'username': 'student_reload',
+        'description': 'Persisted complaint',
+        'category': 'ICT',
+        'status': 'Pending',
+        'created_at': '2026-09-23',
+        'reference_number': 'GRV-20260923-0901',
+        'is_anonymous': False,
+        'evidence_path': None,
+    })
+    app_module.persist_state()
+
+    importlib.reload(app_module)
+
+    try:
+        assert 'student_reload' in app_module.users_db
+        assert any(item.get('reference_number') == 'GRV-20260923-0901' for item in app_module.complaints_db)
+        assert 'IT Services' in app_module.departments
+    finally:
+        app_module.app.config['TESTING'] = True
+        app_module.users_db.pop('student_reload', None)
+        app_module.complaints_db[:] = [item for item in app_module.complaints_db if item.get('id') != 901]
+        app_module.persist_state()
+
+
 def test_submit_grievance_sends_email_notification(monkeypatch):
     sent = {}
 
@@ -173,7 +439,11 @@ def test_submit_grievance_sends_email_notification(monkeypatch):
 
     response = client.post(
         '/submit_grievance',
-        data={'description': 'Email notification test grievance', 'category': 'ICT'},
+        data={
+            'description': 'Email notification test grievance',
+            'category': 'ICT',
+            'evidence': (io.BytesIO(b'fake evidence'), 'evidence.pdf'),
+        },
         follow_redirects=True,
     )
 
@@ -202,7 +472,11 @@ def test_submission_confirmation_email_contains_reference_number(monkeypatch):
 
     response = client.post(
         '/submit_grievance',
-        data={'description': 'Confirmation email test grievance', 'category': 'ICT'},
+        data={
+            'description': 'Confirmation email test grievance',
+            'category': 'ICT',
+            'evidence': (io.BytesIO(b'fake evidence'), 'evidence.pdf'),
+        },
         follow_redirects=True,
     )
 

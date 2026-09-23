@@ -1,15 +1,125 @@
+import io
+import json
 import os
 import uuid
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
+from openpyxl import Workbook
+from openpyxl.chart import BarChart, PieChart, Reference
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from werkzeug.utils import secure_filename
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+
+def load_environment_file(path=None):
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+
+    if not os.path.exists(path):
+        return False
+
+    with open(path, 'r', encoding='utf-8') as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+
+            key, value = line.split('=', 1)
+            key = key.strip().strip('"\'')
+            value = value.strip().strip('"\'')
+            os.environ[key] = value
+
+    return True
+
+
+if load_dotenv:
+    load_dotenv()
+else:
+    load_environment_file()
 
 app = Flask(__name__)
 app.secret_key = 'unizulu_grievance_portal_secret_key'
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+DATA_FILE = os.getenv('PORTAL_STATE_FILE', os.path.join(app.root_path, 'database', 'portal_state.json'))
+
+DEFAULT_USERS_DB = {
+    "student1": {"password": "123", "full_name": "Sbusiso Nkomo", "role": "student", "department": "IT Services", "email": "student1@unizulu.ac.za"},
+    "staff1": {"password": "123", "full_name": "Dr. Mthembu", "role": "staff", "department": "Academic Affairs", "email": "staff1@unizulu.ac.za"},
+    "admin1": {"password": "123", "full_name": "System Administrator", "role": "admin", "department": "Academic Affairs", "email": "admin1@unizulu.ac.za"}
+}
+
+DEFAULT_COMPLAINTS_DB = [
+    {
+        "id": 1,
+        "full_name": "Sbusiso Nkomo",
+        "username": "student1",
+        "description": "WiFi in Residence Block B is not working.",
+        "category": "ICT",
+        "status": "Pending",
+        "created_at": "2026-09-08",
+        "reference_number": "GRV-20260908-0001",
+        "is_anonymous": False,
+        "evidence_path": None
+    }
+]
+
+DEFAULT_DEPARTMENTS = ["Academic Affairs", "IT Services", "Finance", "Student Housing"]
+DEFAULT_COMPLAINT_CATEGORIES = ["Academic", "ICT", "Facilities / Housing", "Finance", "General"]
+
+
+def persist_state(users_data=None, complaints_data=None, departments_data=None, categories_data=None):
+    if app.config.get('TESTING'):
+        return
+
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+    if users_data is None:
+        users_data = globals().get('users_db', DEFAULT_USERS_DB)
+    if complaints_data is None:
+        complaints_data = globals().get('complaints_db', DEFAULT_COMPLAINTS_DB)
+    if departments_data is None:
+        departments_data = globals().get('departments', DEFAULT_DEPARTMENTS)
+    if categories_data is None:
+        categories_data = globals().get('complaint_categories', DEFAULT_COMPLAINT_CATEGORIES)
+
+    state = {
+        'users_db': users_data,
+        'complaints_db': complaints_data,
+        'departments': departments_data,
+        'complaint_categories': categories_data,
+    }
+    with open(DATA_FILE, 'w', encoding='utf-8') as file:
+        json.dump(state, file, indent=2)
+
+
+def load_state():
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+    if not os.path.exists(DATA_FILE):
+        default_users = DEFAULT_USERS_DB.copy()
+        default_complaints = [item.copy() for item in DEFAULT_COMPLAINTS_DB]
+        default_departments = DEFAULT_DEPARTMENTS.copy()
+        default_categories = DEFAULT_COMPLAINT_CATEGORIES.copy()
+        persist_state(default_users, default_complaints, default_departments, default_categories)
+        return default_users, default_complaints, default_departments, default_categories
+
+    with open(DATA_FILE, 'r', encoding='utf-8') as file:
+        try:
+            state = json.load(file) or {}
+        except json.JSONDecodeError:
+            state = {}
+
+    users = state.get('users_db') or DEFAULT_USERS_DB
+    complaints = state.get('complaints_db') or DEFAULT_COMPLAINTS_DB
+    departments_list = state.get('departments') or DEFAULT_DEPARTMENTS
+    categories_list = state.get('complaint_categories') or DEFAULT_COMPLAINT_CATEGORIES
+
+    return users, complaints, departments_list, categories_list
 
 
 def normalize_category(category):
@@ -26,11 +136,39 @@ def normalize_category(category):
         'ict': 'ICT',
         'finance / nsfas': 'Finance',
         'finance': 'Finance',
-        'nsfas': 'NSFAS',
-        'nsfas / finance': 'NSFAS',
+        'nsfas': 'Finance',
+        'nsfas / finance': 'Finance',
     }
 
     return lookup.get(cleaned.lower(), cleaned)
+
+
+def get_department_for_category(category):
+    normalized = normalize_category(category)
+    department_map = {
+        'Academic': 'Academic Affairs',
+        'ICT': 'IT Services',
+        'Finance': 'Finance',
+        'Facilities / Housing': 'Student Housing',
+        'General': 'Academic Affairs',
+    }
+    return department_map.get(normalized, 'Academic Affairs')
+
+
+def get_staff_department_filter():
+    selected_department = session.get('department')
+    if selected_department:
+        return selected_department
+    user = users_db.get(session.get('username'), {})
+    return user.get('department', 'Academic Affairs')
+
+
+def filter_complaints_for_staff():
+    department = get_staff_department_filter()
+    return [
+        complaint for complaint in complaints_db
+        if (complaint.get('department') or get_department_for_category(complaint.get('category'))) == department
+    ]
 
 
 def save_uploaded_evidence(file_storage):
@@ -93,38 +231,38 @@ def build_admin_analytics():
 
 # Mock Databases for Testing
 system_roles = ["student", "staff", "admin"]
-departments = ["Academic Affairs", "IT Services", "Finance", "Student Housing", "Engineering", "Business"]
-complaint_categories = ["Academic", "ICT", "Facilities / Housing", "Finance", "NSFAS", "General"]
-
-users_db = {
-    "student1": {"password": "123", "full_name": "Sbusiso Nkomo", "role": "student", "department": "IT Services", "email": "student1@unizulu.ac.za"},
-    "staff1": {"password": "123", "full_name": "Dr. Mthembu", "role": "staff", "department": "Academic Affairs", "email": "staff1@unizulu.ac.za"},
-    "admin1": {"password": "123", "full_name": "System Administrator", "role": "admin", "department": "Academic Affairs", "email": "admin1@unizulu.ac.za"}
-}
-
-complaints_db = [
-    {
-        "id": 1,
-        "full_name": "Sbusiso Nkomo",
-        "username": "student1",
-        "description": "WiFi in Residence Block B is not working.",
-        "category": "ICT",
-        "status": "Pending",
-        "created_at": "2026-09-08",
-        "reference_number": "GRV-20260908-0001",
-        "is_anonymous": False,
-        "evidence_path": None
-    }
-]
-
+users_db, complaints_db, departments, complaint_categories = load_state()
 online_users = {}
 
-EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.office365.com')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_USERNAME = (os.getenv('EMAIL_USERNAME') or '').strip() or None
 EMAIL_PASSWORD = (os.getenv('EMAIL_PASSWORD') or '').strip() or None
-EMAIL_FROM = os.getenv('EMAIL_FROM', 'no-reply@unizulu.ac.za')
+EMAIL_FROM = os.getenv('EMAIL_FROM', 'no-reply@gmail.com')
 EMAIL_USE_TLS = str(os.getenv('EMAIL_USE_TLS', 'true')).lower() == 'true'
+
+
+def get_email_status():
+    missing = []
+    for key, value in {
+        'EMAIL_HOST': EMAIL_HOST,
+        'EMAIL_PORT': EMAIL_PORT,
+        'EMAIL_USERNAME': EMAIL_USERNAME,
+        'EMAIL_PASSWORD': EMAIL_PASSWORD,
+        'EMAIL_FROM': EMAIL_FROM,
+    }.items():
+        if key in {'EMAIL_PORT', 'EMAIL_FROM'}:
+            continue
+        if not value:
+            missing.append(key)
+
+    return {
+        'configured': not missing,
+        'missing': missing,
+        'host': EMAIL_HOST,
+        'from_address': EMAIL_FROM,
+        'use_tls': EMAIL_USE_TLS,
+    }
 
 
 def get_user_email(username, role='student'):
@@ -267,22 +405,41 @@ def index_page():
 def home_page():
     return render_template('home.html')
 
+
+@app.route('/email_status')
+def email_status():
+    return jsonify(get_email_status())
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
         role = request.form.get('role')
+        department = (request.form.get('department') or '').strip()
+
+        if not role:
+            flash('Please select a role before logging in.', 'danger')
+            return render_template('login.html', departments=departments)
 
         if role == 'student' and (not username.isdigit() or len(username) != 9):
             flash('Student number must be exactly 9 digits.', 'danger')
-            return render_template('login.html')
+            return render_template('login.html', departments=departments)
+
+        if role == 'staff' and not department:
+            flash('Please select a department before logging in as staff.', 'danger')
+            return render_template('login.html', departments=departments)
 
         user = users_db.get(username)
         if user and user['password'] == password and user['role'] == role:
             session['username'] = username
             session['full_name'] = user['full_name']
             session['role'] = user['role']
+            if role == 'staff':
+                session['department'] = department or user.get('department', 'Academic Affairs')
+            else:
+                session.pop('department', None)
 
             flash('Logged in successfully!', 'success')
             if role == 'staff':
@@ -294,7 +451,7 @@ def login():
         else:
             flash('Invalid username, password, or role selection.', 'danger')
 
-    return render_template('login.html')
+    return render_template('login.html', departments=departments)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -312,6 +469,7 @@ def register():
             flash('Username already exists.', 'danger')
         else:
             users_db[username] = {'password': password, 'full_name': full_name, 'role': role}
+            persist_state()
             flash('Registration successful! Please log in.', 'success')
             return redirect(url_for('login'))
 
@@ -340,6 +498,42 @@ def student_dashboard():
 
     return render_template('student_dashboard.html', complaints=student_complaints, latest_reference=latest_reference)
 
+
+@app.route('/track_status')
+def track_status():
+    if 'username' not in session or session.get('role') != 'student':
+        flash('Please login as a student to access this page.', 'danger')
+        return redirect(url_for('login'))
+
+    student_complaints = [c for c in complaints_db if c['username'] == session['username']]
+    latest_reference = next((c.get('reference_number') for c in reversed(student_complaints) if c.get('reference_number')), None)
+    if latest_reference:
+        session['last_reference_number'] = latest_reference
+
+    return render_template('track_status.html', complaints=student_complaints, latest_reference=latest_reference)
+
+
+@app.route('/withdraw_grievance/<int:complaint_id>', methods=['POST'])
+def withdraw_grievance(complaint_id):
+    if 'username' not in session or session.get('role') != 'student':
+        flash('Please login as a student to withdraw a grievance.', 'danger')
+        return redirect(url_for('login'))
+
+    complaint = next((c for c in complaints_db if c['id'] == complaint_id and c['username'] == session['username']), None)
+    if complaint is None:
+        flash('Grievance not found or it is not assigned to your account.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    if complaint.get('status') in {'Resolved', 'Rejected', 'Withdrawn'}:
+        flash('This grievance cannot be withdrawn because it is already resolved, rejected, or withdrawn.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
+    complaint['status'] = 'Withdrawn'
+    persist_state()
+    flash(f'Grievance #{complaint_id} has been withdrawn successfully.', 'success')
+    return redirect(url_for('student_dashboard'))
+
+
 @app.route('/submit_grievance', methods=['POST'])
 def submit_grievance():
     if 'username' not in session:
@@ -355,6 +549,10 @@ def submit_grievance():
         flash('Please provide a description for your grievance.', 'danger')
         return redirect(url_for('student_dashboard'))
 
+    if not evidence_file or not evidence_file.filename:
+        flash('Grievance submission failed: evidence is required. Failure to submit supporting evidence may lead to rejection of your grievance.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
     new_id = len(complaints_db) + 1
     reference_number = generate_reference_number()
     complaint = {
@@ -363,6 +561,7 @@ def submit_grievance():
         "username": session.get('username'),
         "description": description,
         "category": category,
+        "department": get_department_for_category(category),
         "status": "Pending",
         "created_at": datetime.now().strftime('%Y-%m-%d'),
         "reference_number": reference_number,
@@ -370,6 +569,7 @@ def submit_grievance():
         "evidence_path": evidence_path
     }
     complaints_db.append(complaint)
+    persist_state()
 
     send_complaint_notification(complaint)
 
@@ -434,7 +634,13 @@ def staff_dashboard():
         flash('Access restricted to staff only.', 'danger')
         return redirect(url_for('login'))
 
-    return render_template('staff_dashboard.html', complaints=complaints_db)
+    selected_department = session.get('department') or users_db.get(session.get('username'), {}).get('department', 'Academic Affairs')
+    if not selected_department:
+        flash('Please select a department before viewing grievances.', 'danger')
+        return redirect(url_for('login'))
+
+    staff_complaints = filter_complaints_for_staff()
+    return render_template('staff_dashboard.html', complaints=staff_complaints, selected_department=selected_department, departments=departments)
 
 @app.route('/update_status/<int:complaint_id>', methods=['POST'])
 def update_status(complaint_id):
@@ -446,6 +652,7 @@ def update_status(complaint_id):
         if c['id'] == complaint_id:
             previous_status = c.get('status')
             c['status'] = new_status
+            persist_state()
             if previous_status != new_status:
                 send_status_update_notification(c, previous_status, new_status)
             break
@@ -498,6 +705,7 @@ def add_user():
             'role': role,
             'department': department
         }
+        persist_state()
         flash(f'User {full_name} added successfully.', 'success')
     else:
         flash('Username and full name are required.', 'danger')
@@ -513,7 +721,23 @@ def update_user_role(username):
     if username in users_db:
         users_db[username]['role'] = request.form.get('role', users_db[username].get('role', 'student'))
         users_db[username]['department'] = request.form.get('department', users_db[username].get('department', 'Academic Affairs'))
+        persist_state()
         flash(f'User {username} updated successfully.', 'success')
+
+    return redirect(url_for('administrator'))
+
+
+@app.route('/administrator/remove_user/<username>', methods=['POST'])
+def remove_user(username):
+    if 'username' not in session or session.get('role') != 'admin':
+        return redirect(url_for('login'))
+
+    user = users_db.pop(username, None)
+    if user:
+        persist_state()
+        flash(f'User {username} removed successfully.', 'success')
+    else:
+        flash(f'User {username} was not found.', 'danger')
 
     return redirect(url_for('administrator'))
 
@@ -526,6 +750,7 @@ def add_department():
     department_name = request.form.get('department', '').strip()
     if department_name and department_name not in departments:
         departments.append(department_name)
+        persist_state()
         flash(f'Department {department_name} added successfully.', 'success')
     else:
         flash('Department name is invalid or already exists.', 'danger')
@@ -541,9 +766,42 @@ def add_category():
     category_name = request.form.get('category', '').strip()
     if category_name and category_name not in complaint_categories:
         complaint_categories.append(category_name)
+        persist_state()
         flash(f'Complaint category {category_name} added successfully.', 'success')
     else:
         flash('Category name is invalid or already exists.', 'danger')
+
+    return redirect(url_for('administrator'))
+
+
+@app.route('/administrator/remove_department/<path:department>', methods=['POST'])
+def remove_department(department):
+    if 'username' not in session or session.get('role') != 'admin':
+        return redirect(url_for('login'))
+
+    normalized = department.strip()
+    if normalized in departments:
+        departments.remove(normalized)
+        persist_state()
+        flash(f'Department {normalized} removed successfully.', 'success')
+    else:
+        flash(f'Department {normalized} was not found.', 'danger')
+
+    return redirect(url_for('administrator'))
+
+
+@app.route('/administrator/remove_category/<path:category>', methods=['POST'])
+def remove_category(category):
+    if 'username' not in session or session.get('role') != 'admin':
+        return redirect(url_for('login'))
+
+    normalized = category.strip()
+    if normalized in complaint_categories:
+        complaint_categories.remove(normalized)
+        persist_state()
+        flash(f'Category {normalized} removed successfully.', 'success')
+    else:
+        flash(f'Category {normalized} was not found.', 'danger')
 
     return redirect(url_for('administrator'))
 
@@ -554,8 +812,135 @@ def generate_report():
         return redirect(url_for('login'))
 
     analytics = build_admin_analytics()
-    flash(f'Complaint report generated on {analytics["latest_report"]}.', 'success')
-    return redirect(url_for('administrator'))
+    workbook = Workbook()
+    summary_sheet = workbook.active
+    summary_sheet.title = 'Summary'
+    summary_sheet['A1'] = 'Grievance Report'
+    summary_sheet['A1'].font = Font(size=16, bold=True, color='FFFFFF')
+    summary_sheet['A1'].fill = PatternFill('solid', fgColor='003366')
+    summary_sheet.merge_cells('A1:C1')
+    summary_sheet['A1'].alignment = Alignment(horizontal='center')
+
+    summary_sheet['A3'] = 'Generated At'
+    summary_sheet['A3'].font = Font(bold=True)
+    summary_sheet['B3'] = analytics['latest_report']
+    summary_sheet['A5'] = 'Total Complaints'
+    summary_sheet['A5'].font = Font(bold=True)
+    summary_sheet['B5'] = analytics['total_complaints']
+    summary_sheet['B5'].font = Font(bold=True)
+
+    header_fill = PatternFill('solid', fgColor='D9EAF7')
+    summary_sheet['A7'] = 'Status'
+    summary_sheet['A7'].font = Font(bold=True)
+    summary_sheet['A7'].fill = header_fill
+    summary_sheet['B7'] = 'Count'
+    summary_sheet['B7'].font = Font(bold=True)
+    summary_sheet['B7'].fill = header_fill
+    summary_sheet['C7'] = 'Percentage'
+    summary_sheet['C7'].font = Font(bold=True)
+    summary_sheet['C7'].fill = header_fill
+    status_row = 8
+    for status in ['Pending', 'In-Progress', 'Rejected', 'Resolved']:
+        summary_sheet.cell(row=status_row, column=1, value=status)
+        summary_sheet.cell(row=status_row, column=2, value=analytics['status_counts'].get(status, 0))
+        summary_sheet.cell(row=status_row, column=3, value=f"{analytics['status_percentages'].get(status, 0)}%")
+        status_row += 1
+
+    light_border = Border(
+        left=Side(style='thin', color='D9D9D9'),
+        right=Side(style='thin', color='D9D9D9'),
+        top=Side(style='thin', color='D9D9D9'),
+        bottom=Side(style='thin', color='D9D9D9')
+    )
+
+    for cell in summary_sheet['A7:C' + str(status_row - 1)]:
+        for item in cell:
+            item.border = light_border
+
+    status_chart = BarChart()
+    status_chart.title = 'Status Breakdown'
+    status_chart.y_axis.title = 'Count'
+    status_chart.x_axis.title = 'Status'
+    data = Reference(summary_sheet, min_col=2, min_row=7, max_row=11, max_col=2)
+    categories = Reference(summary_sheet, min_col=1, min_row=8, max_row=11)
+    status_chart.add_data(data, titles_from_data=False)
+    status_chart.set_categories(categories)
+    status_chart.height = 7
+    status_chart.width = 13
+    summary_sheet.add_chart(status_chart, 'E7')
+
+    category_sheet = workbook.create_sheet('Category Breakdown')
+    category_sheet['A1'] = 'Category'
+    category_sheet['B1'] = 'Count'
+    category_sheet['C1'] = 'Percentage'
+    category_sheet['A1'].font = Font(bold=True)
+    category_sheet['B1'].font = Font(bold=True)
+    category_sheet['C1'].font = Font(bold=True)
+    category_sheet['A1'].fill = header_fill
+    category_sheet['B1'].fill = header_fill
+    category_sheet['C1'].fill = header_fill
+    category_row = 2
+    for category, count in analytics['category_counts'].items():
+        category_sheet.cell(row=category_row, column=1, value=category)
+        category_sheet.cell(row=category_row, column=2, value=count)
+        category_sheet.cell(row=category_row, column=3, value=f"{analytics['category_percentages'].get(category, 0)}%")
+        category_row += 1
+
+    for cell in category_sheet['A1:C' + str(category_row - 1)]:
+        for item in cell:
+            item.border = light_border
+
+    pie_chart = PieChart()
+    pie_chart.title = 'Complaint Categories'
+    pie_data = Reference(category_sheet, min_col=2, min_row=1, max_row=category_row - 1, max_col=2)
+    pie_categories = Reference(category_sheet, min_col=1, min_row=2, max_row=category_row - 1, max_col=1)
+    pie_chart.add_data(pie_data, titles_from_data=False)
+    pie_chart.set_categories(pie_categories)
+    pie_chart.height = 7
+    pie_chart.width = 12
+    category_sheet.add_chart(pie_chart, 'E4')
+
+    detail_sheet = workbook.create_sheet('Detailed Complaints')
+    detail_headers = ['Reference Number', 'Student Username', 'Student Name', 'Category', 'Department', 'Status', 'Created At', 'Anonymous']
+    for column_index, header in enumerate(detail_headers, start=1):
+        cell = detail_sheet.cell(row=1, column=column_index, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='D9EAF7')
+        cell.alignment = Alignment(horizontal='center')
+
+    for row_index, complaint in enumerate(complaints_db, start=2):
+        detail_sheet.cell(row=row_index, column=1, value=complaint.get('reference_number', ''))
+        detail_sheet.cell(row=row_index, column=2, value=complaint.get('username', ''))
+        detail_sheet.cell(row=row_index, column=3, value=complaint.get('full_name', ''))
+        detail_sheet.cell(row=row_index, column=4, value=complaint.get('category', ''))
+        detail_sheet.cell(row=row_index, column=5, value=complaint.get('department', get_department_for_category(complaint.get('category'))))
+        detail_sheet.cell(row=row_index, column=6, value=complaint.get('status', 'Pending'))
+        detail_sheet.cell(row=row_index, column=7, value=complaint.get('created_at', ''))
+        detail_sheet.cell(row=row_index, column=8, value='Yes' if complaint.get('is_anonymous') else 'No')
+
+    for row in detail_sheet.iter_rows(min_row=1, max_row=detail_sheet.max_row, min_col=1, max_col=8):
+        for cell in row:
+            cell.border = light_border
+
+    for sheet in [summary_sheet, category_sheet, detail_sheet]:
+        for column_cells in sheet.columns:
+            visible_cells = [cell for cell in column_cells if hasattr(cell, 'column_letter')]
+            if not visible_cells:
+                continue
+            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in visible_cells)
+            sheet.column_dimensions[visible_cells[0].column_letter].width = min(max_length + 2, 26)
+
+    summary_sheet.freeze_panes = 'A8'
+    category_sheet.freeze_panes = 'A2'
+    detail_sheet.freeze_panes = 'A2'
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    response = Response(output.getvalue(), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response.headers['Content-Disposition'] = 'attachment; filename=grievance_report.xlsx'
+    return response
 
 
 @app.route('/logout')

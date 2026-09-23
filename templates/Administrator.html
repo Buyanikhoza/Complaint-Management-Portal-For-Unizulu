@@ -239,6 +239,9 @@
                                     </select>
                                     <button type="submit" class="small-btn" style="margin-top: 8px;">Update</button>
                                 </form>
+                                <form action="{{ url_for('remove_user', username=user.username) }}" method="POST" style="margin-top:8px;">
+                                    <button type="submit" class="small-btn" style="background-color:#d9534f;">Remove User</button>
+                                </form>
                             </td>
                         </tr>
                         {% else %}
@@ -263,7 +266,12 @@
                     <label>Current Departments</label>
                     <ul>
                         {% for department in departments %}
-                        <li>{{ department }}</li>
+                        <li>
+                            {{ department }}
+                            <form action="{{ url_for('remove_department', department=department) }}" method="POST" style="display:inline; margin-left:10px;">
+                                <button type="submit" class="small-btn" style="background-color:#d9534f; width:auto; padding:6px 8px;">Delete</button>
+                            </form>
+                        </li>
                         {% endfor %}
                     </ul>
                 </div>
@@ -280,7 +288,12 @@
                     <label>Complaint Categories</label>
                     <ul>
                         {% for category in complaint_categories %}
-                        <li>{{ category }}</li>
+                        <li>
+                            {{ category }}
+                            <form action="{{ url_for('remove_category', category=category) }}" method="POST" style="display:inline; margin-left:10px;">
+                                <button type="submit" class="small-btn" style="background-color:#d9534f; width:auto; padding:6px 8px;">Delete</button>
+                            </form>
+                        </li>
                         {% endfor %}
                     </ul>
                 </div>
@@ -290,12 +303,12 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        const categoryData = {{ analytics.category_counts|tojson }};
-        const statusData = {{ analytics.status_counts|tojson }};
+        const categoryData = JSON.parse('{{ analytics.category_counts|tojson|safe }}');
+        const statusData = JSON.parse('{{ analytics.status_counts|tojson|safe }}');
 
         const categoryLabels = Object.keys(categoryData);
         const categoryValues = Object.values(categoryData);
-        const categoryPercentages = Object.values({{ analytics.category_percentages|tojson }});
+        const categoryPercentages = Object.values(JSON.parse('{{ analytics.category_percentages|tojson|safe }}'));
 
         new Chart(document.getElementById('categoryChart'), {
             type: 'bar',

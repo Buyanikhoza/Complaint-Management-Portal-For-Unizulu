@@ -138,6 +138,11 @@ def normalize_category(category):
         'finance': 'Finance',
         'nsfas': 'Finance',
         'nsfas / finance': 'Finance',
+        'housing': 'Facilities / Housing',
+        'facilities / housing': 'Facilities / Housing',
+        'facilities housing': 'Facilities / Housing',
+        'student housing': 'Facilities / Housing',
+        'general': 'General',
     }
 
     return lookup.get(cleaned.lower(), cleaned)
@@ -165,10 +170,17 @@ def get_staff_department_filter():
 
 def filter_complaints_for_staff():
     department = get_staff_department_filter()
-    return [
-        complaint for complaint in complaints_db
-        if (complaint.get('department') or get_department_for_category(complaint.get('category'))) == department
-    ]
+    filtered = []
+
+    for complaint in complaints_db:
+        complaint_department = complaint.get('department') or get_department_for_category(complaint.get('category'))
+        complaint_category = normalize_category(complaint.get('category'))
+        is_general = complaint_category == 'General' or complaint_department == 'General'
+
+        if complaint_department == department or is_general:
+            filtered.append(complaint)
+
+    return filtered
 
 
 def save_uploaded_evidence(file_storage):

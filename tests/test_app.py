@@ -138,6 +138,15 @@ def test_student_dashboard_chatbot_asks_about_anonymous_submission(client):
     assert 'Do you want to submit this complaint anonymously? Reply with Yes or No.' in html
 
 
+def test_student_dashboard_ai_assistant_is_anchored_away_from_withdraw_buttons(client):
+    response = client.get('/student_dashboard')
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'left: 20px;' in html
+    assert 'left: 24px;' in html
+
+
 def test_student_track_status_button_navigates_to_separate_page(client):
     response = client.get('/student_dashboard')
 
@@ -256,6 +265,59 @@ def test_staff_login_requires_department_and_filters_complaints():
         assert 'IT issue not for academic staff' not in html
     finally:
         complaints_db[:] = [entry for entry in complaints_db if entry.get('id') not in {9998, 9999}]
+
+
+def test_staff_dashboard_shows_housing_and_general_complaints_for_relevant_departments():
+    from app import complaints_db
+
+    complaints_db.extend([
+        {
+            'id': 9981,
+            'full_name': 'Housing Student',
+            'username': 'housing_student',
+            'description': 'Housing complaint for student housing staff',
+            'category': 'Housing',
+            'status': 'Pending',
+            'created_at': '2026-09-23',
+            'reference_number': 'GRV-20260923-9981',
+            'is_anonymous': False,
+            'evidence_path': None,
+        },
+        {
+            'id': 9982,
+            'full_name': 'General Student',
+            'username': 'general_student',
+            'description': 'General complaint for all staff',
+            'category': 'General',
+            'status': 'Pending',
+            'created_at': '2026-09-23',
+            'reference_number': 'GRV-20260923-9982',
+            'is_anonymous': False,
+            'evidence_path': None,
+        },
+    ])
+
+    try:
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session['username'] = 'staff1'
+            session['full_name'] = 'Dr. Mthembu'
+            session['role'] = 'staff'
+            session['department'] = 'Student Housing'
+
+        housing_response = client.get('/staff_dashboard')
+        housing_html = housing_response.get_data(as_text=True)
+        assert 'Housing complaint for student housing staff' in housing_html
+        assert 'General complaint for all staff' in housing_html
+
+        with client.session_transaction() as session:
+            session['department'] = 'Academic Affairs'
+
+        academic_response = client.get('/staff_dashboard')
+        academic_html = academic_response.get_data(as_text=True)
+        assert 'General complaint for all staff' in academic_html
+    finally:
+        complaints_db[:] = [entry for entry in complaints_db if entry.get('id') not in {9981, 9982}]
 
 
 def test_admin_can_manage_users_departments_and_categories():

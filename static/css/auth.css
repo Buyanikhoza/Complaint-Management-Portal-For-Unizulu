@@ -1,0 +1,28 @@
+* { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body.auth-page { background-color: #eef2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+body.auth-page.auth-login, body.auth-page.auth-register, body.auth-page.auth-forgot { height: 100vh; }
+.auth-page .card { background: white; padding: 30px; border-radius: 8px; width: 100%; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.auth-page.auth-login .card { text-align: center; }
+.auth-page.auth-reset .card { max-width: 420px; }
+.auth-page.auth-register h2 { text-align: center; }
+.auth-page h2 { color: #003366; margin-top: 0; }
+.auth-page.auth-login h2 { margin-bottom: 20px; }
+.auth-page.auth-forgot h2 { text-align: center; }
+.auth-page.auth-reset h2 { margin: 0 0 20px; text-align: center; }
+.auth-page .form-group { margin-bottom: 15px; }
+.auth-login .form-group { text-align: left; }
+.auth-page label { font-weight: 600; display: block; margin-bottom: 5px; color: #333; }
+.auth-page input, .auth-page select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+.auth-page .btn { width: 100%; padding: 10px; background-color: #003366; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+.auth-page .btn:hover { background-color: #002244; }
+.auth-page .links { margin-top: 15px; text-align: center; font-size: 13px; }
+.auth-page .links a { color: #003366; text-decoration: none; font-weight: bold; }
+.auth-page .links a:hover { text-decoration: underline; }
+.auth-page .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; font-size: 13px; }
+.auth-login .alert { text-align: left; }
+.auth-page .alert-success { background: #d4edda; color: #155724; }
+.auth-page .alert-danger { background: #f8d7da; color: #721c24; }
+.auth-login .alert-info { background: #d1ecf1; color: #0c5460; }
+.auth-page .logo { width: 100px; margin-bottom: 15px; }
+.auth-page .recovery-note { line-height: 1.6; color: #334155; }
+.auth-page .is-hidden { display: none; }

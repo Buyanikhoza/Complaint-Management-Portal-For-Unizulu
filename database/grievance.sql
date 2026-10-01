@@ -24,8 +24,20 @@ CREATE TABLE IF NOT EXISTS complaints (
     FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- 3. Sample Initial Data (Optional test users)
-INSERT INTO users (username, email, password, role) VALUES
-('240041246', 'khoza@unizulu.ac.za', 'pbkdf2:sha256:password_hash_here', 'student'),
-('staff_member', 'staff@unizulu.ac.za', 'pbkdf2:sha256:password_hash_here', 'staff'),
-('admin_user', 'admin@unizulu.ac.za', 'pbkdf2:sha256:password_hash_here', 'admin');
+-- Evidence bytes are stored in MySQL. complaint_id matches the portal's JSON complaint IDs.
+CREATE TABLE IF NOT EXISTS evidence_files (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    complaint_id INT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    stored_filename VARCHAR(255) NOT NULL UNIQUE,
+    stored_path VARCHAR(500) NOT NULL,
+    mime_type VARCHAR(127) NOT NULL,
+    size_bytes BIGINT UNSIGNED NOT NULL,
+    file_data LONGBLOB NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- For an existing table, run these once (adjust the FK name if your database uses a custom name):
+-- ALTER TABLE evidence_files DROP FOREIGN KEY evidence_files_ibfk_1;
+-- ALTER TABLE evidence_files MODIFY complaint_id INT NULL;
+-- ALTER TABLE evidence_files ADD COLUMN file_data LONGBLOB NULL;

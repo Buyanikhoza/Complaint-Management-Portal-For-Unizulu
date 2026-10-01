@@ -1,0 +1,15 @@
+* { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body.home-page { background-color: #f4f6f9; margin: 0; }
+.home-page nav { background-color: #003366; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+.home-page nav h2 { margin: 0; font-size: 1.4rem; }
+.home-page .nav-links a { color: white; text-decoration: none; margin-left: 20px; font-weight: 500; }
+.home-page .nav-links a.logout { background-color: #d9534f; padding: 6px 12px; border-radius: 4px; }
+.home-page .container { max-width: 1000px; margin: 30px auto; padding: 0 20px; }
+.home-page .welcome-card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 25px; }
+.home-page .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.home-page .stat-card { background: white; padding: 20px; border-radius: 8px; border-left: 5px solid #003366; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+.home-page .stat-card.pending { border-color: #f0ad4e; }
+.home-page .stat-card.resolved { border-color: #5cb85c; }
+.home-page .stat-card h4 { margin: 0; color: #666; font-size: 0.9rem; }
+.home-page .stat-card p { margin: 10px 0 0 0; font-size: 1.8rem; font-weight: bold; color: #003366; }
+.home-page .btn { display: inline-block; margin-top: 15px; padding: 10px 20px; background-color: #003366; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; }

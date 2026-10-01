@@ -4,94 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Dashboard</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 20px; }
-        header { display: flex; justify-content: space-between; align-items: center; background-color: #003366; color: white; padding: 15px 20px; border-radius: 6px; }
-        .logout { color: white; background: #d9534f; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-weight: bold; }
-        .container { margin-top: 20px; background: white; padding: 20px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .status-box { background: #edf6ff; border-left: 6px solid #003366; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px; }
-        .status-box strong { color: #003366; }
-        .toolbar { display: flex; justify-content: flex-end; margin: 15px 0 20px; }
-        .btn { background: #003366; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; }
-        .btn-secondary { background: #0b7dda; }
-        .track-status-pane {
-            background: #f4f9ff; border: 1px solid #d8e6ff; border-radius: 10px; padding: 20px; margin-bottom: 24px;
-        }
-        .track-status-grid { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-        .track-status-grid input { flex: 1; min-width: 220px; padding: 10px; border: 1px solid #cfd8ea; border-radius: 6px; }
-        .status-result { margin-top: 14px; background: white; border: 1px solid #dfe9f7; border-radius: 8px; padding: 12px 14px; color: #163d66; }
-        .status-result.error { color: #9b1c1c; background: #fff4f4; border-color: #f2c7c7; }
-        .form-group { margin-bottom: 15px; }
-        label { font-weight: bold; display: block; margin-bottom: 5px; }
-        textarea, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border-bottom: 1px solid #ddd; padding: 10px; text-align: left; }
-        th { background: #003366; color: white; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-        .badge-Pending { background: #ffeeba; color: #856404; }
-        .badge-Resolved { background: #c3e6cb; color: #155724; }
-        .badge-In-Progress { background: #b8daff; color: #004085; }
-        .badge-Rejected { background: #f8d7da; color: #721c24; }
-        .badge-Withdrawn { background: #e2e3e5; color: #383d41; }
-        .btn-danger { background: #d9534f !important; }
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; background: #d4edda; color: #155724; }
-
-        .chatbot-toggle {
-            position: fixed; left: 20px; right: auto; bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;
-            min-width: 210px; height: 62px; padding: 0 18px; border: 3px solid rgba(255,255,255,0.8);
-            border-radius: 999px; background: linear-gradient(135deg, #003366, #0057b8);
-            color: #fff; cursor: pointer; font-size: 16px; font-weight: 700; line-height: 1;
-            box-shadow: 0 10px 20px rgba(0, 51, 102, 0.4), 0 0 0 5px rgba(0, 87, 184, 0.2);
-            z-index: 1000;
-        }
-        .chatbot-toggle .helper-text {
-            font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.9;
-        }
-        .chatbot-toggle .icon {
-            font-size: 26px; line-height: 1; display: inline-flex;
-        }
-        .chatbot-toggle:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 12px 22px rgba(0, 51, 102, 0.45), 0 0 0 6px rgba(0, 87, 184, 0.2);
-        }
-        @keyframes chatbotPulse {
-            0%, 100% { transform: translateY(0); }
-            25% { transform: translateY(-2px); }
-            50% { transform: translateY(0); }
-            75% { transform: translateY(-2px); }
-        }
-        .chatbot-toggle {
-            animation: chatbotPulse 2.7s ease-in-out infinite;
-        }
-        .chatbot-panel {
-            position: fixed; left: 24px; right: auto; bottom: 92px; width: 360px; max-height: 480px;
-            background: white; border-radius: 16px; box-shadow: 0 10px 24px rgba(0,0,0,0.18);
-            border: 1px solid #dfe9f5; overflow: hidden; display: none; z-index: 1000;
-        }
-        .chatbot-panel.open { display: block; }
-        .chatbot-header { background: #003366; color: white; padding: 12px 14px; font-weight: bold; }
-        .chatbot-header .status-dot { width: 10px; height: 10px; background: #5ad072; border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: middle; }
-        .chatbot-body { max-height: 260px; overflow-y: auto; padding: 12px; background: #f8fafc; }
-        .chat-message { margin: 8px 0; padding: 10px 12px; border-radius: 10px; max-width: 90%; }
-        .chat-message.bot { background: #e7f0ff; color: #123; margin-right: auto; }
-        .chat-message.user { background: #003366; color: #fff; margin-left: auto; }
-        .chatbot-input-wrap { display: flex; align-items: center; gap: 8px; border-top: 1px solid #e6edf7; background: white; padding: 10px; }
-        .chatbot-input { flex: 1; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; outline: none; }
-        .chatbot-upload { background: #0f766e; color: white; border: none; border-radius: 8px; padding: 9px 12px; cursor: pointer; font-weight: 600; }
-        .chatbot-send { border: none; background: #003366; color: white; padding: 10px 16px; cursor: pointer; border-radius: 8px; font-weight: 600; }
-        .chatbot-evidence-label { font-size: 12px; color: #475569; padding: 0 10px 10px; }
-        .assistant-banner {
-            background: linear-gradient(135deg, #eef6ff, #dfeeff);
-            color: #123;
-            border: 1px solid #d7e7ff;
-            border-radius: 10px;
-            padding: 10px 12px;
-            margin: 0 0 10px 0;
-            font-size: 12px;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/student_dashboard.css') }}">
 </head>
-<body>
+<body class="student-page">
     <header>
         <h2>Student Grievance Portal</h2>
         <div>
@@ -129,7 +44,6 @@
                     <option value="ICT">ICT</option>
                     <option value="Facilities / Housing">Facilities / Housing</option>
                     <option value="Finance">Finance</option>
-                    <option value="General">General</option>
                 </select>
             </div>
             <div class="form-group">
@@ -138,13 +52,13 @@
             </div>
             <div class="form-group">
                 <label>Upload Evidence (required)</label>
-                <p style="margin: 0 0 8px; color: #8a3a3a; font-size: 13px; line-height: 1.5;">
+                <p class="evidence-note">
                     Evidence is required. Failure to submit supporting evidence may lead to rejection of your grievance.
                 </p>
                 <input type="file" name="evidence" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.txt" required />
             </div>
             <div class="form-group">
-                <label style="font-weight: normal; display: flex; align-items: center; gap: 8px;">
+                <label class="anonymous-label">
                     <input type="checkbox" name="anonymous" value="on">
                     Submit anonymously
                 </label>
@@ -152,7 +66,7 @@
             <button type="submit" class="btn">Submit Grievance</button>
         </form>
 
-        <h3 style="margin-top: 30px;">My Submitted Grievances</h3>
+        <h3 class="section-heading">My Submitted Grievances</h3>
         <table>
             <thead>
                 <tr>
@@ -177,7 +91,7 @@
                     <td>{{ 'Anonymous' if item.is_anonymous else item.full_name }}</td>
                     <td>
                         {% if item.evidence_path %}
-                            <a href="{{ url_for('static', filename=item.evidence_path) }}" target="_blank">View</a>
+                            <a href="{{ get_evidence_preview_url(item.evidence_path) }}" target="_blank" rel="noopener noreferrer">View</a>
                         {% else %}
                             None
                         {% endif %}
@@ -186,8 +100,8 @@
                     <td>{{ item.created_at }}</td>
                     <td>
                         {% if item.status not in ['Resolved', 'Rejected', 'Withdrawn'] %}
-                        <form action="{{ url_for('withdraw_grievance', complaint_id=item.id) }}" method="POST" style="display:inline;">
-                            <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to withdraw this grievance?');">Withdraw</button>
+                        <form action="{{ url_for('withdraw_grievance', complaint_id=item.id) }}" method="POST" class="withdraw-form">
+                            <button type="submit" class="btn btn-danger">Withdraw</button>
                         </form>
                         {% else %}
                         —
@@ -196,14 +110,14 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="9" style="text-align: center;">No grievances submitted yet.</td>
+                    <td colspan="9" class="text-center">No grievances submitted yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
-    <div id="latest-reference" data-reference="{{ latest_reference or 'No reference yet' }}" style="display: none;"></div>
+    <div id="latest-reference" class="is-hidden" data-reference="{{ latest_reference or 'No reference yet' }}"></div>
 
     <button id="chatbot-toggle" class="chatbot-toggle" aria-label="Open grievance assistant" title="Open AI grievance assistant">
         <span class="helper-text">Need help?</span>
@@ -217,7 +131,7 @@
             <div class="chat-message bot">Hi, how can I help you?</div>
         </div>
         <div class="chatbot-input-wrap">
-            <input id="chatbot-evidence" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="display:none;" />
+            <input id="chatbot-evidence" class="is-hidden" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" />
             <button id="chatbot-upload" class="chatbot-upload" type="button">Upload Evidence</button>
             <input id="chatbot-input" class="chatbot-input" type="text" placeholder="Ask about reporting..." />
             <button id="chatbot-send" class="chatbot-send" type="button">Send</button>
@@ -225,315 +139,6 @@
         <div id="chatbot-evidence-label" class="chatbot-evidence-label">No evidence selected</div>
     </div>
 
-    <script>
-        const latestReferenceElement = document.getElementById('latest-reference');
-        const latestReference = latestReferenceElement ? latestReferenceElement.dataset.reference : 'No reference yet';
-        const evidencePromptText = 'Do you want to upload a supporting document? Reply with Yes or No.';
-        const anonymousPromptText = 'Do you want to submit this complaint anonymously? Reply with Yes or No.';
-        const chatbotToggle = document.getElementById('chatbot-toggle');
-        const chatbotPanel = document.getElementById('chatbot-panel');
-        const chatbotInput = document.getElementById('chatbot-input');
-        const chatbotBody = document.getElementById('chatbot-body');
-        const chatbotSend = document.getElementById('chatbot-send');
-        const chatbotEvidenceInput = document.getElementById('chatbot-evidence');
-        const chatbotUploadBtn = document.getElementById('chatbot-upload');
-        const chatbotEvidenceLabel = document.getElementById('chatbot-evidence-label');
-        const chatState = {
-            mode: null,
-            category: null,
-            description: null,
-            evidence: null,
-            anonymous: null
-        };
-
-        chatbotToggle.addEventListener('click', function () {
-            chatbotPanel.classList.toggle('open');
-            if (chatbotPanel.classList.contains('open')) {
-                chatbotInput.focus();
-            }
-        });
-
-        function addMessage(type, text) {
-            const message = document.createElement('div');
-            message.className = 'chat-message ' + type;
-            message.textContent = text;
-            chatbotBody.appendChild(message);
-            chatbotBody.scrollTop = chatbotBody.scrollHeight;
-        }
-
-        function detectCategory(text) {
-            const categoryRules = [
-                { keywords: ['academic', 'mark', 'exam', 'course', 'lecturer', 'class', 'result', 'assessment', 'exam timetable', 'attendance', 'module', 'assignment', 'test', 'syllabus', 'registration', 'timetable', 'grade', 'final mark', 'admission', 'library', 'scholarly'], category: 'Academic' },
-                { keywords: ['ict', 'it', 'network', 'wifi', 'internet', 'portal login', 'system', 'password', 'email', 'lms', 'software', 'computer', 'printer', 'device', 'connectivity', 'offline', 'server', 'system outage', 'access issue', 'vpn', 'data', 'website', 'app', 'login issue', 'authentication'], category: 'ICT' },
-                { keywords: ['fees', 'finance', 'payment', 'refund', 'account balance', 'tuition', 'scholarship', 'invoice', 'debt', 'banking', 'cash', 'financial aid', 'student allowance', 'stipend', 'salary', 'balance'], category: 'Finance' },
-                { keywords: ['hostel', 'residence', 'accommodation', 'room', 'housing', 'water', 'electricity', 'security', 'roommate', 'bathroom', 'toilet', 'kitchen', 'laundry', 'lights', 'heater', 'door lock', 'windows', 'cleaning', 'maintenance', 'leak', 'plumbing', 'gas', 'fridge', 'freezer', 'sanitation', 'mold', 'pest'], category: 'Facilities / Housing' },
-                { keywords: ['general', 'other', 'unclear', 'not sure', 'miscellaneous', 'unknown', 'question', 'query', 'concern', 'problem'], category: 'General' }
-            ];
-
-            const lowerText = text.toLowerCase();
-            const issueSignals = ['problem', 'issue', 'not working', 'broken', 'failed', 'error', 'wrong', 'cannot', 'can not', 'can\'t', 'unable', 'stuck', 'slow', 'missing', 'not responding', 'does not', 'doesn\'t', 'is not', 'isn\'t', 'doesn’t', 'won\'t', 'needs fixing', 'trouble', 'freeze', 'freezes', 'fault', 'bad', 'wrong', 'improper', 'late', 'delay', 'payment', 'marks', 'wifi'];
-
-            const looksLikeComplaint = issueSignals.some(signal => lowerText.includes(signal)) || lowerText.length > 35;
-            if (!looksLikeComplaint) {
-                return null;
-            }
-
-            for (const rule of categoryRules) {
-                if (rule.keywords.some(keyword => lowerText.includes(keyword))) {
-                    return rule.category;
-                }
-            }
-
-            return 'General';
-        }
-
-        function extractReferenceNumber(text) {
-            const match = text.match(/GRV-[A-Z0-9-]+/i);
-            if (match) return match[0];
-            if (text.includes('latest')) return latestReference && latestReference !== 'No reference yet' ? latestReference : null;
-            return null;
-        }
-
-        async function lookupComplaintStatus(referenceNumber) {
-            try {
-                const response = await fetch('/complaint_status', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ reference_number: referenceNumber })
-                });
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Reference number not found.');
-                }
-
-                return 'Reference number: ' + data.reference_number + '. Status: ' + data.status + '. Category: ' + data.category + '.';
-            } catch (error) {
-                return error.message || 'I could not find that reference number.';
-            }
-        }
-
-        function getSelectedEvidenceFile() {
-            return chatbotEvidenceInput.files && chatbotEvidenceInput.files.length > 0 ? chatbotEvidenceInput.files[0] : null;
-        }
-
-        async function submitComplaintFromChat(category, description, anonymous = false, evidenceFile = null) {
-            const formData = new FormData();
-            formData.append('category', category);
-            formData.append('description', description);
-            if (anonymous) {
-                formData.append('anonymous', 'on');
-            }
-            if (evidenceFile) {
-                formData.append('evidence', evidenceFile, evidenceFile.name);
-            }
-
-            try {
-                const response = await fetch('/submit_grievance', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const text = await response.text();
-                if (!response.ok) {
-                    return 'I could not submit the complaint right now. Please try again from the form.';
-                }
-
-                if (text.includes('Reference number:')) {
-                    const match = text.match(/Reference number: (GRV-[A-Z0-9-]+)/i);
-                    if (match) {
-                        return 'Your complaint has been submitted successfully. Your reference number is ' + match[1] + '. You can use this number to check the status later.';
-                    }
-                }
-
-                return 'Your complaint has been submitted successfully. Please keep the reference number shown on the screen to track the complaint later.';
-            } catch (error) {
-                return 'I could not submit the complaint right now. Please try again from the complaint form.';
-            }
-        }
-
-        async function handleChatInput() {
-            const value = chatbotInput.value.trim();
-            if (!value) return;
-
-            addMessage('user', value);
-            chatbotInput.value = '';
-
-            const text = value.toLowerCase();
-            const referenceNumber = extractReferenceNumber(value);
-            const statusRequested = text.includes('status') || text.includes('reference') || text.includes('track') || /GRV-[A-Z0-9-]+/i.test(value);
-            const complaintRequested = text.includes('submit') || text.includes('report') || text.includes('complaint') || text.includes('issue');
-            const greeting = text.includes('hello') || text.includes('hi');
-            const wantsLatestStatus = text.includes('latest') || text.includes('most recent') || text.includes('recent');
-
-            if (chatState.mode === 'submit-evidence') {
-                const answer = value.toLowerCase();
-                const selectedEvidence = getSelectedEvidenceFile() || chatState.evidence;
-
-                if (answer.includes('continue') || answer.includes('next') || answer.includes('submit')) {
-                    if (!selectedEvidence) {
-                        addMessage('bot', 'Evidence upload is required to submit the complaint. Please click the Upload Evidence button and choose a file before continuing.');
-                        return;
-                    }
-                    chatState.evidence = selectedEvidence;
-                    chatState.mode = 'submit-anonymous';
-                    addMessage('bot', anonymousPromptText);
-                    return;
-                }
-
-                if (!selectedEvidence) {
-                    addMessage('bot', 'Evidence upload is required before submission. Please upload a file using the Upload Evidence button and then type "continue".');
-                    return;
-                }
-
-                chatState.evidence = selectedEvidence;
-                chatState.mode = 'submit-anonymous';
-                addMessage('bot', anonymousPromptText);
-                return;
-            }
-
-            if (chatState.mode === 'submit-anonymous') {
-                const answer = value.toLowerCase();
-                if (answer.includes('yes') || answer.includes('anonymous')) {
-                    chatState.anonymous = true;
-                    chatState.mode = null;
-                    addMessage('bot', 'I am submitting your complaint now...');
-                    const response = await submitComplaintFromChat(chatState.category || 'General', chatState.description || 'Submitted through chatbot', true, chatState.evidence || getSelectedEvidenceFile());
-                    addMessage('bot', response);
-                    chatState.category = null;
-                    chatState.description = null;
-                    chatState.anonymous = null;
-                    chatState.evidence = null;
-                    chatbotEvidenceInput.value = '';
-                    chatbotEvidenceLabel.textContent = 'No evidence selected';
-                    return;
-                }
-
-                if (answer.includes('no') || answer.includes('public') || answer.includes('visible')) {
-                    chatState.anonymous = false;
-                    chatState.mode = null;
-                    addMessage('bot', 'I am submitting your complaint now...');
-                    const response = await submitComplaintFromChat(chatState.category || 'General', chatState.description || 'Submitted through chatbot', false, chatState.evidence || getSelectedEvidenceFile());
-                    addMessage('bot', response);
-                    chatState.category = null;
-                    chatState.description = null;
-                    chatState.anonymous = null;
-                    chatState.evidence = null;
-                    chatbotEvidenceInput.value = '';
-                    chatbotEvidenceLabel.textContent = 'No evidence selected';
-                    return;
-                }
-
-                addMessage('bot', 'Please reply with Yes to submit anonymously or No to submit with your name visible.');
-                return;
-            }
-
-            if (chatState.mode === 'await-upload') {
-                if (value.toLowerCase().includes('continue') || value.toLowerCase().includes('submit')) {
-                    chatState.mode = 'submit-anonymous';
-                    addMessage('bot', 'Do you want to submit this complaint anonymously? Reply with Yes or No.');
-                    return;
-                }
-
-                addMessage('bot', 'Please upload the support document in the form and then reply with "continue" to send the complaint.');
-                return;
-            }
-
-            if (chatState.mode === 'submit-description') {
-                const description = value.trim();
-                if (!description) {
-                    addMessage('bot', 'Please provide a short description of the issue so I can submit it.');
-                    return;
-                }
-
-                chatState.description = description;
-                chatState.mode = 'submit-evidence';
-                addMessage('bot', evidencePromptText + ' Evidence upload is required before submission. Please click the Upload Evidence button, choose the file, and then type "continue".');
-                return;
-            }
-
-            if (chatState.mode === 'submit-category') {
-                const category = detectCategory(value);
-                if (!category) {
-                    addMessage('bot', 'I could not match that. Please choose a category like Academic, ICT, Finance, Facilities / Housing, or General.');
-                    return;
-                }
-
-                chatState.category = category;
-                chatState.mode = 'submit-description';
-                addMessage('bot', 'Thanks. Please describe the issue in a short paragraph so I can submit it for you.');
-                return;
-            }
-
-            if (statusRequested) {
-                if (referenceNumber) {
-                    const statusText = await lookupComplaintStatus(referenceNumber);
-                    addMessage('bot', statusText);
-                    return;
-                }
-
-                if (wantsLatestStatus && latestReference && latestReference !== 'No reference yet') {
-                    addMessage('bot', 'I can check the most recent complaint only when you explicitly ask for it. Please provide the reference number so I can check the correct complaint status.');
-                    return;
-                }
-
-                addMessage('bot', 'Please send your reference number, for example GRV-20260908-0001, and I will check the status for you.');
-                return;
-            }
-
-            if (complaintRequested) {
-                chatState.mode = 'submit-category';
-                chatState.category = null;
-                chatState.description = null;
-                addMessage('bot', 'I can submit it for you. First, what is the complaint category? Choose from Academic, ICT, Finance, Facilities / Housing, or General.');
-                return;
-            }
-
-            const detectedCategory = detectCategory(value);
-            if (detectedCategory) {
-                const message = 'This sounds like a ' + detectedCategory + ' issue. Please tell me the full issue details and I will submit it for you.';
-                chatState.mode = 'submit-description';
-                chatState.category = detectedCategory;
-                addMessage('bot', message);
-                return;
-            }
-
-            if (greeting) {
-                addMessage('bot', 'Hi, how can I help you? I can help you submit a complaint, choose the right category, or check your complaint status by reference number.');
-                return;
-            }
-
-            if (text.includes('category') || text.includes('choose')) {
-                addMessage('bot', 'The main categories are Academic, ICT, Finance, Facilities / Housing, and General. Tell me the problem and I will match it to the right one.');
-                return;
-            }
-
-            addMessage('bot', 'I can help you submit a complaint, check its status using a reference number, or guide you to the correct category.');
-        }
-
-        chatbotUploadBtn.addEventListener('click', function () {
-            chatbotEvidenceInput.click();
-        });
-
-        chatbotEvidenceInput.addEventListener('change', function () {
-            const file = getSelectedEvidenceFile();
-            chatbotEvidenceLabel.textContent = file ? file.name : 'No evidence selected';
-            if (chatState.mode === 'submit-evidence' && file) {
-                chatState.evidence = file;
-                addMessage('bot', 'Evidence selected. Type "continue" to proceed to the anonymous submission question.');
-            }
-        });
-
-        chatbotSend.addEventListener('click', handleChatInput);
-        chatbotInput.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') {
-                handleChatInput();
-            }
-        });
-
-
-    </script>
+    <script src="{{ url_for('static', filename='js/student_dashboard.js') }}" defer></script>
 </body>
 </html>

@@ -4,68 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Home - UNIZULU Grievance Portal</title>
-    <style>
-        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #f4f6f9; margin: 0; }
-        nav {
-            background-color: #003366;
-            color: white;
-            padding: 15px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        nav h2 { margin: 0; font-size: 1.4rem; }
-        .nav-links a {
-            color: white;
-            text-decoration: none;
-            margin-left: 20px;
-            font-weight: 500;
-        }
-        .nav-links a.logout {
-            background-color: #d9534f;
-            padding: 6px 12px;
-            border-radius: 4px;
-        }
-        .container {
-            max-width: 1000px;
-            margin: 30px auto;
-            padding: 0 20px;
-        }
-        .welcome-card {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            margin-bottom: 25px;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-        }
-        .stat-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            border-left: 5px solid #003366;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-        }
-        .stat-card h4 { margin: 0; color: #666; font-size: 0.9rem; }
-        .stat-card p { margin: 10px 0 0 0; font-size: 1.8rem; font-weight: bold; color: #003366; }
-        .btn {
-            display: inline-block;
-            margin-top: 15px;
-            padding: 10px 20px;
-            background-color: #003366;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            font-weight: bold;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
 </head>
-<body>
+<body class="home-page">
 
     <nav>
         <h2>UNIZULU Portal</h2>
@@ -89,11 +30,11 @@
                 <h4>Total Submitted</h4>
                 <p>{{ total_complaints|default(0) }}</p>
             </div>
-            <div class="stat-card" style="border-color: #f0ad4e;">
+            <div class="stat-card pending">
                 <h4>Pending Review</h4>
                 <p>{{ pending_complaints|default(0) }}</p>
             </div>
-            <div class="stat-card" style="border-color: #5cb85c;">
+            <div class="stat-card resolved">
                 <h4>Resolved</h4>
                 <p>{{ resolved_complaints|default(0) }}</p>
             </div>

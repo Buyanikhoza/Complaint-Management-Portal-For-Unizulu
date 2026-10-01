@@ -4,91 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Administrator Panel - UNIZULU Portal</title>
-    <style>
-        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #f4f6f9; margin: 0; }
-        header {
-            background-color: #003366;
-            color: white;
-            padding: 15px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        header h2 { margin: 0; font-size: 1.4rem; }
-        .logout-btn {
-            background-color: #d9534f;
-            color: white;
-            padding: 8px 14px;
-            text-decoration: none;
-            border-radius: 4px;
-            font-weight: bold;
-        }
-        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
-        .card {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            margin-bottom: 25px;
-        }
-        .card h3 { color: #003366; margin-top: 0; border-bottom: 2px solid #eef2f5; padding-bottom: 10px; }
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-top: 20px; }
-        .stat-box { background: #edf6ff; border-left: 5px solid #003366; padding: 18px; border-radius: 6px; }
-        .stat-box strong { display: block; font-size: 1.8rem; color: #003366; }
-        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; margin-top: 20px; }
-        .chart-card { background: #f9fbff; border: 1px solid #dfe9f5; border-radius: 10px; padding: 18px; }
-        .chart-card h4 { margin: 0 0 12px; color: #003366; }
-        .chart-card canvas { width: 100% !important; height: 240px !important; }
-        .grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 25px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border-bottom: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #003366; color: white; }
-        .badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-        .badge-student { background-color: #d9edf7; color: #31708f; }
-        .badge-staff { background-color: #dff0d8; color: #3c763d; }
-        .badge-admin { background-color: #f2dede; color: #a94442; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 15px; }
-        .field-group { margin-bottom: 12px; }
-        label { display: block; font-weight: 600; margin-bottom: 5px; }
-        input, select, button { width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #cfd8e3; }
-        button, .btn-link {
-            background-color: #003366; color: white; border: none; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; text-align: center;
-        }
-        .btn-link { padding: 10px 14px; }
-        .small-btn { background-color: #0057b8; }
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
-        .alert-success { background: #d4edda; color: #155724; }
-        .alert-danger { background: #f8d7da; color: #721c24; }
-        ul { margin: 10px 0 0 20px; }
-        ul li {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 6px 0;
-        }
-        ul li > span {
-            flex: 1;
-        }
-        .inline-action-form {
-            display: inline-flex;
-            margin-left: auto;
-        }
-        .inline-action-form button {
-            width: auto;
-            min-width: 76px;
-            padding: 6px 10px;
-        }
-        .no-pad { margin: 0; }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/Administrator.css') }}">
 </head>
-<body>
+<body class="admin-page" data-category-counts='{{ analytics.category_counts|tojson }}' data-status-counts='{{ analytics.status_counts|tojson }}'>
 
     <header>
         <h2>System Administration Control Panel</h2>
@@ -110,8 +28,8 @@
 
         <div class="card">
             <h3>System Status & ML Model Overview</h3>
-            <p><strong>Machine Learning Classifier:</strong> <span style="color: green;">Active (TF-IDF + Naive Bayes / SVM)</span></p>
-            <p><strong>Database Connection:</strong> <span style="color: green;">Connected</span></p>
+            <p><strong>Machine Learning Classifier:</strong> <span class="status-active">Active (TF-IDF + Naive Bayes / SVM)</span></p>
+            <p><strong>Database Connection:</strong> <span class="status-active">Connected</span></p>
             <a href="{{ url_for('generate_report') }}" class="btn-link">Generate Complaint Report</a>
         </div>
 
@@ -222,7 +140,7 @@
                             <label>Password</label>
                             <input type="password" name="password" value="123" required>
                         </div>
-                        <div class="field-group" style="display:flex; align-items: end;">
+                        <div class="field-group field-end">
                             <button type="submit" class="small-btn">Add User</button>
                         </div>
                     </div>
@@ -256,10 +174,16 @@
                                         <option value="{{ department }}" {% if department == user.department %}selected{% endif %}>{{ department }}</option>
                                         {% endfor %}
                                     </select>
-                                    <button type="submit" class="small-btn" style="margin-top: 8px;">Update</button>
+                                    <button type="submit" class="small-btn mt-8">Update</button>
                                 </form>
-                                <form action="{{ url_for('remove_user', username=user.username) }}" method="POST" style="margin-top:8px;">
-                                    <button type="submit" class="small-btn" style="background-color:#d9534f;">Remove User</button>
+                                <form action="{{ url_for('remove_user', username=user.username) }}" method="POST" class="form-spaced">
+                                    <button type="submit" class="small-btn danger-action">Remove User</button>
+                                </form>
+                                <form action="{{ url_for('reset_user_password', username=user.username) }}" method="POST" class="form-spaced">
+                                    <label for="temporary-password-{{ loop.index }}">Set a new password</label>
+                                    <input id="temporary-password-{{ loop.index }}" type="password" name="new_password" minlength="8" autocomplete="new-password" required>
+                                    <input type="password" name="confirm_password" minlength="8" placeholder="Confirm new password" aria-label="Confirm new password" autocomplete="new-password" required>
+                                    <button type="submit" class="small-btn mt-8">Reset Password</button>
                                 </form>
                             </td>
                         </tr>
@@ -277,7 +201,7 @@
                     <label>Add Department</label>
                     <form action="{{ url_for('add_department') }}" method="POST">
                         <input type="text" name="department" placeholder="e.g. Psychology" required>
-                        <button type="submit" style="margin-top: 8px;">Add Department</button>
+                        <button type="submit" class="mt-8">Add Department</button>
                     </form>
                 </div>
 
@@ -288,18 +212,18 @@
                         <li>
                             <span>{{ department }}</span>
                             <form class="inline-action-form" action="{{ url_for('remove_department', department=department) }}" method="POST">
-                                <button type="submit" class="small-btn" style="background-color:#d9534f;">Delete</button>
+                                <button type="submit" class="small-btn danger-action">Delete</button>
                             </form>
                         </li>
                         {% endfor %}
                     </ul>
                 </div>
 
-                <div class="field-group" style="margin-top: 20px;">
+                <div class="field-group mt-20">
                     <label>Add Complaint Category</label>
                     <form action="{{ url_for('add_category') }}" method="POST">
                         <input type="text" name="category" placeholder="e.g. Admissions" required>
-                        <button type="submit" style="margin-top: 8px;">Add Category</button>
+                        <button type="submit" class="mt-8">Add Category</button>
                     </form>
                 </div>
 
@@ -310,7 +234,7 @@
                         <li>
                             <span>{{ category }}</span>
                             <form class="inline-action-form" action="{{ url_for('remove_category', category=category) }}" method="POST">
-                                <button type="submit" class="small-btn" style="background-color:#d9534f;">Delete</button>
+                                <button type="submit" class="small-btn danger-action">Delete</button>
                             </form>
                         </li>
                         {% endfor %}
@@ -321,73 +245,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-        const categoryData = JSON.parse('{{ analytics.category_counts|tojson|safe }}');
-        const statusData = JSON.parse('{{ analytics.status_counts|tojson|safe }}');
-
-        const categoryLabels = Object.keys(categoryData);
-        const categoryValues = Object.values(categoryData);
-        const categoryPercentages = Object.values(JSON.parse('{{ analytics.category_percentages|tojson|safe }}'));
-
-        new Chart(document.getElementById('categoryChart'), {
-            type: 'bar',
-            data: {
-                labels: categoryLabels,
-                datasets: [{
-                    label: 'Complaints',
-                    data: categoryValues,
-                    backgroundColor: ['#003366', '#0057b8', '#4e8ad8', '#7db4ff', '#dbeafe', '#cfe2ff'],
-                    borderRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: { precision: 0 }
-                    }
-                }
-            }
-        });
-
-        new Chart(document.getElementById('statusChart'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Pending', 'In-Progress', 'Rejected', 'Resolved'],
-                datasets: [{
-                    data: [
-                        statusData['Pending'] || 0,
-                        statusData['In-Progress'] || 0,
-                        statusData['Rejected'] || 0,
-                        statusData['Resolved'] || 0,
-                    ],
-                    backgroundColor: ['#f4b942', '#0057b8', '#d9534f', '#2ca66b'],
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const value = context.raw || 0;
-                                const total = Object.values(statusData).reduce((sum, item) => sum + item, 0) || 1;
-                                const percentage = ((value / total) * 100).toFixed(1);
-                                return `${context.label}: ${value} (${percentage}%)`;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    </script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 
 </body>
 </html>

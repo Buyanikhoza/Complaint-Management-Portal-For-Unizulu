@@ -1,0 +1,15 @@
+body.track-page { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 20px; }
+.track-page .page { max-width: 900px; margin: 0 auto; }
+.track-page header { display: flex; justify-content: space-between; align-items: center; background-color: #003366; color: white; padding: 15px 20px; border-radius: 6px; }
+.track-page .nav { display: flex; gap: 12px; align-items: center; }
+.track-page .nav a, .track-page .logout { color: white; background: #d9534f; padding: 8px 12px; text-decoration: none; border-radius: 4px; font-weight: bold; }
+.track-page .nav a.primary { background: #0057b8; }
+.track-page .card { margin-top: 20px; background: white; padding: 24px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+.track-page .status-box { background: #edf6ff; border-left: 6px solid #003366; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px; }
+.track-page .status-box strong { color: #003366; }
+.track-page .track-status-grid { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.track-page .track-status-grid input { flex: 1; min-width: 220px; padding: 10px; border: 1px solid #cfd8ea; border-radius: 6px; }
+.track-page .btn { background: #003366; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; }
+.track-page .status-result { margin-top: 14px; background: #f8fafc; border: 1px solid #dfe9f7; border-radius: 8px; padding: 12px 14px; color: #163d66; }
+.track-page .status-result.error { color: #9b1c1c; background: #fff4f4; border-color: #f2c7c7; }
+.track-page .help-copy { margin: 10px 0 0; color: #5b6b82; font-size: 14px; }

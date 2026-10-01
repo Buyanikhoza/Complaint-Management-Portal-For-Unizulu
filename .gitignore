@@ -3,4 +3,5 @@ __pycache__/*
 .pytest_cache
 .venv
 .env
+database/portal_state.json
 static/uploads/*

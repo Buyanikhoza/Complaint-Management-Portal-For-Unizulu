@@ -4,22 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register - UNIZULU Portal</title>
-    <style>
-        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #eef2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 30px; border-radius: 8px; width: 100%; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        h2 { color: #003366; margin-top: 0; text-align: center; }
-        .form-group { margin-bottom: 15px; }
-        label { font-weight: 600; display: block; margin-bottom: 5px; }
-        input, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        .btn { width: 100%; padding: 10px; background-color: #003366; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
-        .links { margin-top: 15px; text-align: center; font-size: 13px; }
-        .links a { color: #003366; text-decoration: none; font-weight: bold; }
-        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; font-size: 13px; }
-        .alert-danger { background: #f8d7da; color: #721c24; }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
 </head>
-<body>
+<body class="auth-page auth-register">
     <div class="card">
         <h2>Register Account</h2>
 

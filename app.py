@@ -1,11 +1,16 @@
 import io
 import json
+import mimetypes
 import os
 import uuid
 import smtplib
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+from functools import lru_cache
 from email.message import EmailMessage
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
+from flask import Flask, abort, render_template, request, redirect, url_for, session, flash, jsonify, Response, send_file
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -44,37 +49,22 @@ else:
     load_environment_file()
 
 app = Flask(__name__)
-app.secret_key = 'unizulu_grievance_portal_secret_key'
+app.secret_key = os.getenv('FLASK_SECRET_KEY')
+if not app.secret_key:
+    raise RuntimeError('Set FLASK_SECRET_KEY in the ignored .env file before starting the app.')
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 DATA_FILE = os.getenv('PORTAL_STATE_FILE', os.path.join(app.root_path, 'database', 'portal_state.json'))
 
-DEFAULT_USERS_DB = {
-    "student1": {"password": "123", "full_name": "Sbusiso Nkomo", "role": "student", "department": "IT Services", "email": "student1@unizulu.ac.za"},
-    "staff1": {"password": "123", "full_name": "Dr. Mthembu", "role": "staff", "department": "Academic Affairs", "email": "staff1@unizulu.ac.za"},
-    "admin1": {"password": "123", "full_name": "System Administrator", "role": "admin", "department": "Academic Affairs", "email": "admin1@unizulu.ac.za"}
-}
-
-DEFAULT_COMPLAINTS_DB = [
-    {
-        "id": 1,
-        "full_name": "Sbusiso Nkomo",
-        "username": "student1",
-        "description": "WiFi in Residence Block B is not working.",
-        "category": "ICT",
-        "status": "Pending",
-        "created_at": "2026-09-08",
-        "reference_number": "GRV-20260908-0001",
-        "is_anonymous": False,
-        "evidence_path": None
-    }
-]
+DEFAULT_USERS_DB = {}
+DEFAULT_COMPLAINTS_DB = []
+DEFAULT_EVIDENCE_FILES = []
 
 DEFAULT_DEPARTMENTS = ["Academic Affairs", "IT Services", "Finance", "Student Housing"]
-DEFAULT_COMPLAINT_CATEGORIES = ["Academic", "ICT", "Facilities / Housing", "Finance", "General"]
+DEFAULT_COMPLAINT_CATEGORIES = ["Academic", "ICT", "Facilities / Housing", "Finance"]
 
 
-def persist_state(users_data=None, complaints_data=None, departments_data=None, categories_data=None):
+def persist_state(users_data=None, complaints_data=None, departments_data=None, categories_data=None, evidence_data=None):
     if app.config.get('TESTING'):
         return
 
@@ -87,12 +77,15 @@ def persist_state(users_data=None, complaints_data=None, departments_data=None, 
         departments_data = globals().get('departments', DEFAULT_DEPARTMENTS)
     if categories_data is None:
         categories_data = globals().get('complaint_categories', DEFAULT_COMPLAINT_CATEGORIES)
+    if evidence_data is None:
+        evidence_data = globals().get('evidence_files', DEFAULT_EVIDENCE_FILES)
 
     state = {
         'users_db': users_data,
         'complaints_db': complaints_data,
         'departments': departments_data,
         'complaint_categories': categories_data,
+        'evidence_files': evidence_data,
     }
     with open(DATA_FILE, 'w', encoding='utf-8') as file:
         json.dump(state, file, indent=2)
@@ -102,11 +95,12 @@ def load_state():
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     if not os.path.exists(DATA_FILE):
         default_users = DEFAULT_USERS_DB.copy()
-        default_complaints = [item.copy() for item in DEFAULT_COMPLAINTS_DB]
+        default_complaints = DEFAULT_COMPLAINTS_DB.copy()
         default_departments = DEFAULT_DEPARTMENTS.copy()
         default_categories = DEFAULT_COMPLAINT_CATEGORIES.copy()
-        persist_state(default_users, default_complaints, default_departments, default_categories)
-        return default_users, default_complaints, default_departments, default_categories
+        default_evidence_files = DEFAULT_EVIDENCE_FILES.copy()
+        persist_state(default_users, default_complaints, default_departments, default_categories, default_evidence_files)
+        return default_users, default_complaints, default_departments, default_categories, default_evidence_files
 
     with open(DATA_FILE, 'r', encoding='utf-8') as file:
         try:
@@ -118,17 +112,18 @@ def load_state():
     complaints = state.get('complaints_db') or DEFAULT_COMPLAINTS_DB
     departments_list = state.get('departments') or DEFAULT_DEPARTMENTS
     categories_list = state.get('complaint_categories') or DEFAULT_COMPLAINT_CATEGORIES
+    evidence_files_list = state.get('evidence_files') or DEFAULT_EVIDENCE_FILES
 
-    return users, complaints, departments_list, categories_list
+    return users, complaints, departments_list, categories_list, evidence_files_list
 
 
 def normalize_category(category):
     if not category:
-        return 'General'
+        return 'Academic'
 
     cleaned = category.strip()
     if not cleaned:
-        return 'General'
+        return 'Academic'
 
     lookup = {
         'it / network': 'ICT',
@@ -142,7 +137,7 @@ def normalize_category(category):
         'facilities / housing': 'Facilities / Housing',
         'facilities housing': 'Facilities / Housing',
         'student housing': 'Facilities / Housing',
-        'general': 'General',
+        'general': 'Academic',
     }
 
     return lookup.get(cleaned.lower(), cleaned)
@@ -155,9 +150,126 @@ def get_department_for_category(category):
         'ICT': 'IT Services',
         'Finance': 'Finance',
         'Facilities / Housing': 'Student Housing',
-        'General': 'Academic Affairs',
     }
     return department_map.get(normalized, 'Academic Affairs')
+
+
+CHATBOT_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ML_model', 'complaint_classifier.pkl')
+CHATBOT_CATEGORY_MAP = {
+    'Academics': 'Academic',
+    'ICT Services': 'ICT',
+    'Financial Aid': 'Finance',
+    'Residences': 'Facilities / Housing',
+}
+CHATBOT_SAFETY_LABELS = {'Harassment & Protection', 'Campus Security'}
+CHATBOT_CONFIDENCE_THRESHOLD = 0.4
+CHATBOT_SAFETY_KEYWORDS = (
+    'harassment', 'harassed', 'bullying', 'bullied', 'threatened', 'threatening',
+    'stalking', 'stalked', 'assault', 'gender-based violence', 'gender based violence',
+    'gbv', 'unsafe', 'campus security', 'stolen', 'theft', 'robbery',
+)
+CHATBOT_CATEGORY_KEYWORDS = {
+    'ICT': ('wifi', 'wi-fi', 'internet', 'network', 'portal', 'login', 'log in', 'password', 'moodle', 'student email', 'computer lab', 'ict'),
+    'Finance': ('allowance', 'nsfas', 'bursary', 'funding', 'financial aid', 'tuition', 'fees', 'fee', 'payment', 'refund', 'account balance', 'finance'),
+    'Facilities / Housing': ('residence', 'hostel', 'housing', 'room', 'water', 'electricity', 'plumbing', 'maintenance', 'broken window', 'repair'),
+    'Academic': ('exam', 'mark', 'marks', 'grade', 'results', 'transcript', 'lecturer', 'module', 'registration', 'timetable', 'remark', 'academic'),
+}
+CHATBOT_SYSTEM_PROMPT = (
+    'You are the UNIZULU student grievance assistant. Respond warmly, briefly, and clearly in at most two sentences. '
+    'Help students understand grievance submission and university support options. '
+    'Do not claim to submit a grievance, access student records, or check its status; the portal handles those actions separately. '
+    'Do not request passwords, student numbers, or unnecessary sensitive details. '
+    'If a suggested grievance category is provided, explain it as a suggestion, not a final decision. '
+    'For immediate danger, tell the student to contact campus security or emergency services directly.'
+)
+
+
+@lru_cache(maxsize=1)
+def load_chatbot_model():
+    import joblib
+
+    return joblib.load(CHATBOT_MODEL_PATH)
+
+
+def classify_chatbot_message(message):
+    model = load_chatbot_model()
+    probabilities = model.predict_proba([message])[0]
+    labels = getattr(model, 'classes_', None)
+    if labels is None:
+        labels = model[-1].classes_
+
+    best_index = max(range(len(probabilities)), key=probabilities.__getitem__)
+    predicted_label = str(labels[best_index])
+    confidence = float(probabilities[best_index])
+
+    if predicted_label in CHATBOT_SAFETY_LABELS and confidence >= CHATBOT_CONFIDENCE_THRESHOLD:
+        return {
+            'category': None,
+            'confidence': round(confidence, 4),
+            'needs_safety_review': True,
+        }
+
+    category = CHATBOT_CATEGORY_MAP.get(predicted_label)
+    if confidence < CHATBOT_CONFIDENCE_THRESHOLD or category is None:
+        return {
+            'category': None,
+            'confidence': round(confidence, 4),
+            'needs_safety_review': False,
+        }
+
+    return {
+        'category': category,
+        'confidence': round(confidence, 4),
+        'needs_safety_review': False,
+    }
+
+
+def infer_chatbot_fallback(message):
+    normalized = message.casefold()
+    if any(keyword in normalized for keyword in CHATBOT_SAFETY_KEYWORDS):
+        return {'category': None, 'confidence': None, 'needs_safety_review': True}
+
+    matches = [
+        category
+        for category, keywords in CHATBOT_CATEGORY_KEYWORDS.items()
+        if any(keyword in normalized for keyword in keywords)
+    ]
+    if len(matches) == 1:
+        return {'category': matches[0], 'confidence': None, 'needs_safety_review': False}
+    return None
+
+
+def generate_chatbot_reply(messages, suggested_category=None):
+    instructions = CHATBOT_SYSTEM_PROMPT
+    if suggested_category:
+        instructions += (
+            f' The local classifier suggests {suggested_category}. Acknowledge the concern and explain '
+            'that the portal will next ask for supporting evidence before submission.'
+        )
+
+    request_body = {
+        'model': os.getenv('OLLAMA_MODEL', 'llama3.2:1b'),
+        'messages': [{'role': 'system', 'content': instructions}, *messages],
+        'stream': False,
+        'options': {'temperature': 0.4, 'num_ctx': 1024, 'num_predict': 96},
+    }
+    base_url = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/')
+    ollama_request = Request(
+        f'{base_url}/api/chat',
+        data=json.dumps(request_body).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urlopen(ollama_request, timeout=120) as response:
+            result = json.loads(response.read().decode('utf-8'))
+    except URLError as error:
+        raise RuntimeError('The local Ollama server is unavailable.') from error
+
+    reply = result.get('message', {}).get('content', '').strip()
+    if not reply:
+        raise RuntimeError('The local model returned an empty response.')
+    return reply
 
 
 def get_staff_department_filter():
@@ -174,36 +286,194 @@ def filter_complaints_for_staff():
 
     for complaint in complaints_db:
         complaint_department = complaint.get('department') or get_department_for_category(complaint.get('category'))
-        complaint_category = normalize_category(complaint.get('category'))
-        is_general = complaint_category == 'General' or complaint_department == 'General'
-
-        if complaint_department == department or is_general:
+        if complaint_department == department:
             filtered.append(complaint)
 
     return filtered
 
 
-def save_uploaded_evidence(file_storage):
+def get_database_connection():
+    database_config = {
+        'host': os.getenv('MYSQL_HOST'),
+        'port': int(os.getenv('MYSQL_PORT', '3306')),
+        'user': os.getenv('MYSQL_USER'),
+        'password': os.getenv('MYSQL_PASSWORD', ''),
+        'database': os.getenv('MYSQL_DATABASE'),
+    }
+    if not database_config['host'] or not database_config['user'] or not database_config['database']:
+        raise RuntimeError('Set MYSQL_HOST, MYSQL_USER, and MYSQL_DATABASE in .env before submitting evidence.')
+
+    try:
+        import mysql.connector
+    except ImportError as error:
+        raise RuntimeError('Install the project requirements to enable MySQL evidence storage.') from error
+
+    return mysql.connector.connect(**database_config)
+
+
+def migrate_legacy_evidence():
+    if not os.path.isdir(UPLOAD_FOLDER):
+        return
+
+    legacy_files = [
+        filename for filename in os.listdir(UPLOAD_FOLDER)
+        if os.path.isfile(os.path.join(UPLOAD_FOLDER, filename))
+    ]
+    if not legacy_files:
+        return
+
+    connection = get_database_connection()
+    cursor = connection.cursor()
+    migrated_files = []
+    try:
+        for stored_filename in legacy_files:
+            file_path = os.path.join(UPLOAD_FOLDER, stored_filename)
+            metadata = next((item for item in evidence_files if item.get('stored_filename') == stored_filename), None)
+            with open(file_path, 'rb') as evidence_file:
+                file_data = evidence_file.read()
+
+            original_filename = (metadata or {}).get('original_filename')
+            if not original_filename:
+                original_filename = stored_filename.partition('_')[2] or stored_filename
+            mime_type = (metadata or {}).get('mime_type') or mimetypes.guess_type(original_filename)[0] or 'application/octet-stream'
+            complaint_id = (metadata or {}).get('complaint_id')
+            cursor.execute(
+                'INSERT INTO evidence_files '
+                '(complaint_id, original_filename, stored_filename, stored_path, mime_type, size_bytes, file_data) '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s) '
+                'ON DUPLICATE KEY UPDATE stored_path = VALUES(stored_path), mime_type = VALUES(mime_type), '
+                'size_bytes = VALUES(size_bytes), file_data = VALUES(file_data)',
+                (complaint_id, original_filename, stored_filename, f'database/{stored_filename}', mime_type, len(file_data), file_data),
+            )
+            migrated_files.append((file_path, metadata, stored_filename, len(file_data)))
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+    for file_path, metadata, stored_filename, file_size in migrated_files:
+        os.remove(file_path)
+        if metadata:
+            metadata['stored_path'] = f'database/{stored_filename}'
+            complaint = next((item for item in complaints_db if item.get('id') == metadata.get('complaint_id')), None)
+            if complaint:
+                complaint['evidence_path'] = metadata['stored_path']
+        else:
+            evidence_files.append({
+                'id': max((item.get('id', 0) for item in evidence_files), default=0) + 1,
+                'complaint_id': None,
+                'original_filename': stored_filename.partition('_')[2] or stored_filename,
+                'stored_filename': stored_filename,
+                'stored_path': f'database/{stored_filename}',
+                'mime_type': mimetypes.guess_type(stored_filename)[0] or 'application/octet-stream',
+                'size_bytes': file_size,
+                'uploaded_at': datetime.now().isoformat(timespec='seconds'),
+            })
+
+    persist_state()
+
+
+def save_uploaded_evidence(file_storage, complaint_id):
     if not file_storage or not file_storage.filename:
         return None
 
-    filename = secure_filename(file_storage.filename)
-    unique_name = f"{uuid.uuid4().hex}_{filename}"
-    file_storage.save(os.path.join(UPLOAD_FOLDER, unique_name))
-    return f"uploads/{unique_name}"
+    original_filename = os.path.basename(file_storage.filename)
+    safe_filename = secure_filename(original_filename) or 'evidence'
+    unique_name = f"{uuid.uuid4().hex}_{safe_filename}"
+    file_data = file_storage.read()
+    metadata = {
+        'id': max((item.get('id', 0) for item in evidence_files), default=0) + 1,
+        'complaint_id': complaint_id,
+        'original_filename': original_filename,
+        'stored_filename': unique_name,
+        'stored_path': f'database/{unique_name}',
+        'mime_type': file_storage.mimetype or 'application/octet-stream',
+        'size_bytes': len(file_data),
+        'uploaded_at': datetime.now().isoformat(timespec='seconds'),
+    }
+
+    connection = get_database_connection()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            'INSERT INTO evidence_files '
+            '(complaint_id, original_filename, stored_filename, stored_path, mime_type, size_bytes, file_data) '
+            'VALUES (%s, %s, %s, %s, %s, %s, %s)',
+            (complaint_id, original_filename, unique_name, metadata['stored_path'], metadata['mime_type'], len(file_data), file_data),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+    return metadata
 
 
 def get_evidence_preview_url(evidence_path):
     if not evidence_path:
         return None
-    return url_for('static', filename=evidence_path)
+    return url_for('serve_evidence', stored_filename=os.path.basename(evidence_path))
 
 
 app.jinja_env.globals['get_evidence_preview_url'] = get_evidence_preview_url
 
 
+@app.route('/evidence/<path:stored_filename>')
+def serve_evidence(stored_filename):
+    if 'username' not in session:
+        abort(401)
+
+    try:
+        migrate_legacy_evidence()
+        connection = get_database_connection()
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                'SELECT file_data, original_filename, mime_type, complaint_id '
+                'FROM evidence_files WHERE stored_filename = %s',
+                (os.path.basename(stored_filename),),
+            )
+            evidence = cursor.fetchone()
+        finally:
+            cursor.close()
+            connection.close()
+    except Exception:
+        app.logger.exception('Unable to retrieve evidence from MySQL')
+        abort(503)
+
+    if not evidence or evidence[0] is None:
+        abort(404)
+
+    complaint = next((item for item in complaints_db if item.get('id') == evidence[3]), None)
+    role = session.get('role')
+    if role == 'student':
+        allowed = complaint is not None and complaint.get('username') == session.get('username')
+    elif role == 'staff':
+        complaint_department = (complaint or {}).get('department') or get_department_for_category((complaint or {}).get('category'))
+        allowed = complaint is not None and complaint_department == get_staff_department_filter()
+    else:
+        allowed = role == 'admin'
+
+    if not allowed:
+        abort(403)
+
+    return send_file(
+        io.BytesIO(evidence[0]),
+        mimetype=evidence[2],
+        download_name=evidence[1],
+        as_attachment=False,
+    )
+
+
 def generate_reference_number():
-    count = len(complaints_db) + 1
+    count = max((int(item.get('id', 0)) for item in complaints_db), default=0) + 1
     today = datetime.now().strftime('%Y%m%d')
     return f'GRV-{today}-{count:04d}'
 
@@ -213,10 +483,12 @@ def build_admin_analytics():
     status_counts = {"Pending": 0, "In-Progress": 0, "Rejected": 0, "Resolved": 0}
 
     for complaint in complaints_db:
-        category = complaint.get('category', 'General')
+        category = complaint.get('category', 'Academic')
         category_counts[category] = category_counts.get(category, 0) + 1
 
         status = complaint.get('status', 'Pending')
+        if status == 'In Progress':
+            status = 'In-Progress'
         if status in status_counts:
             status_counts[status] += 1
         else:
@@ -243,7 +515,7 @@ def build_admin_analytics():
 
 # Mock Databases for Testing
 system_roles = ["student", "staff", "admin"]
-users_db, complaints_db, departments, complaint_categories = load_state()
+users_db, complaints_db, departments, complaint_categories, evidence_files = load_state()
 online_users = {}
 
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
@@ -279,12 +551,14 @@ def get_email_status():
 
 def get_user_email(username, role='student'):
     user = users_db.get(username, {})
-    if user.get('email'):
-        return user['email']
     if role == 'student':
         student_number = str(username).strip()
         if student_number.isdigit() and len(student_number) == 9:
             return f'{student_number}@stu.unizulu.ac.za'
+    if user.get('email'):
+        return user['email']
+    if role == 'student':
+        student_number = str(username).strip()
         if student_number and student_number != 'None':
             return f'{student_number}@stu.unizulu.ac.za'
         return None
@@ -487,15 +761,80 @@ def register():
 
     return render_template('register.html')
 
-@app.route('/forgot_password', methods=['GET', 'POST'])
+@app.route('/forgot_password')
+@app.route('/forgot_password', methods=['POST'])
 def forgot_password():
     if request.method == 'POST':
-        username = request.form.get('username')
-        if username in users_db:
-            flash('A password reset link has been sent to your registered email.', 'info')
-        else:
-            flash('Username not found.', 'danger')
+        username = (request.form.get('username') or '').strip()
+        user = users_db.get(username)
+
+        if user and user.get('role') == 'student' and username.isdigit() and len(username) == 9:
+            token_version = uuid.uuid4().hex
+            user['password_reset_token_version'] = token_version
+            persist_state()
+
+            serializer = URLSafeTimedSerializer(app.secret_key, salt='password-reset')
+            token = serializer.dumps({'username': username, 'version': token_version})
+            reset_url = url_for('reset_password', token=token, _external=True)
+            message = (
+                'We received a request to reset your student portal password. '
+                f'Use this link within one hour: {reset_url}\n\n'
+                'If you did not request this reset, you can ignore this email.'
+            )
+            send_email_notification(
+                'Student portal password reset',
+                message,
+                [f'{username}@stu.unizulu.ac.za'],
+            )
+
+        flash(
+            'If that student number is registered, the system will attempt to send a reset link to its '
+            '@stu.unizulu.ac.za address. Check spam, and contact a system administrator if no email arrives.',
+            'info',
+        )
+        return redirect(url_for('forgot_password'))
+
     return render_template('forgot_password.html')
+
+
+@app.route('/reset_password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    serializer = URLSafeTimedSerializer(app.secret_key, salt='password-reset')
+    try:
+        token_data = serializer.loads(token, max_age=3600)
+    except SignatureExpired:
+        flash('This reset link has expired. Please request another one.', 'danger')
+        return redirect(url_for('forgot_password'))
+    except BadSignature:
+        flash('This reset link is invalid. Please request another one.', 'danger')
+        return redirect(url_for('forgot_password'))
+
+    username = token_data.get('username')
+    user = users_db.get(username)
+    if (
+        not user
+        or user.get('role') != 'student'
+        or user.get('password_reset_token_version') != token_data.get('version')
+    ):
+        flash('This reset link is no longer valid. Please request another one.', 'danger')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        if len(new_password) < 8:
+            flash('Passwords must be at least 8 characters long.', 'danger')
+        elif new_password != confirm_password:
+            flash('The password confirmation does not match.', 'danger')
+        else:
+            user['password'] = new_password
+            user['password_reset_token_version'] = uuid.uuid4().hex
+            persist_state()
+            flash('Your password has been reset. Please log in with your new password.', 'success')
+            return redirect(url_for('login'))
+
+    return render_template('reset_password.html')
+
 
 @app.route('/student_dashboard')
 def student_dashboard():
@@ -552,10 +891,9 @@ def submit_grievance():
         return redirect(url_for('login'))
 
     description = (request.form.get('description') or '').strip()
-    category = normalize_category(request.form.get('category', 'General'))
+    category = normalize_category(request.form.get('category', 'Academic'))
     anonymous = request.form.get('anonymous') == 'on' or request.form.get('anonymous') == 'true'
     evidence_file = request.files.get('evidence')
-    evidence_path = save_uploaded_evidence(evidence_file)
 
     if not description:
         flash('Please provide a description for your grievance.', 'danger')
@@ -565,7 +903,15 @@ def submit_grievance():
         flash('Grievance submission failed: evidence is required. Failure to submit supporting evidence may lead to rejection of your grievance.', 'danger')
         return redirect(url_for('student_dashboard'))
 
-    new_id = len(complaints_db) + 1
+    new_id = max((int(item.get('id', 0)) for item in complaints_db), default=0) + 1
+    try:
+        migrate_legacy_evidence()
+        evidence_metadata = save_uploaded_evidence(evidence_file, new_id)
+    except Exception:
+        app.logger.exception('Unable to store grievance evidence in MySQL')
+        flash('Grievance submission failed: evidence could not be saved to the database. Check the MySQL configuration and try again.', 'danger')
+        return redirect(url_for('student_dashboard'))
+
     reference_number = generate_reference_number()
     complaint = {
         "id": new_id,
@@ -578,9 +924,10 @@ def submit_grievance():
         "created_at": datetime.now().strftime('%Y-%m-%d'),
         "reference_number": reference_number,
         "is_anonymous": anonymous,
-        "evidence_path": evidence_path
+        "evidence_path": evidence_metadata['stored_path']
     }
     complaints_db.append(complaint)
+    evidence_files.append(evidence_metadata)
     persist_state()
 
     send_complaint_notification(complaint)
@@ -597,6 +944,73 @@ def get_complaint_by_reference(reference_number):
         complaint for complaint in complaints_db
         if complaint.get('reference_number') == reference_number and complaint.get('username') == session.get('username')
     ), None)
+
+
+@app.route('/chatbot/classify', methods=['POST'])
+def chatbot_classify():
+    if 'username' not in session or session.get('role') != 'student':
+        return jsonify({'error': 'Please log in as a student to use the grievance assistant.'}), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('message'), str):
+        return jsonify({'error': 'A text message is required.'}), 400
+
+    message = data['message'].strip()
+    if len(message) < 8:
+        return jsonify({'error': 'Please describe the issue in a little more detail.'}), 400
+    if len(message) > 2000:
+        return jsonify({'error': 'Please keep the issue description under 2000 characters.'}), 400
+
+    try:
+        result = classify_chatbot_message(message)
+    except (ImportError, OSError, ValueError) as error:
+        app.logger.error('Local grievance classifier is unavailable: %s', error)
+        return jsonify({'error': 'The local classifier is unavailable. Please use the grievance form.'}), 503
+
+    return jsonify(result)
+
+
+@app.route('/chatbot/chat', methods=['POST'])
+def chatbot_chat():
+    if 'username' not in session or session.get('role') != 'student':
+        return jsonify({'error': 'Please log in as a student to use the grievance assistant.'}), 401
+
+    data = request.get_json(silent=True)
+    messages = data.get('messages') if isinstance(data, dict) else None
+    if not isinstance(messages, list) or not messages or len(messages) > 12:
+        return jsonify({'error': 'Send up to 12 recent chat messages.'}), 400
+
+    clean_messages = []
+    total_characters = 0
+    for item in messages:
+        if not isinstance(item, dict) or item.get('role') not in {'user', 'assistant'}:
+            return jsonify({'error': 'Chat messages must have a user or assistant role.'}), 400
+        content = item.get('content')
+        if not isinstance(content, str) or not content.strip() or len(content) > 2000:
+            return jsonify({'error': 'Each chat message must contain 1 to 2000 characters.'}), 400
+        total_characters += len(content)
+        clean_messages.append({'role': item['role'], 'content': content.strip()})
+
+    if total_characters > 8000 or clean_messages[-1]['role'] != 'user':
+        return jsonify({'error': 'Send a user message with no more than 8000 total characters.'}), 400
+
+    latest_message = clean_messages[-1]['content']
+    try:
+        classification = classify_chatbot_message(latest_message)
+        if not classification['category'] and not classification['needs_safety_review']:
+            classification = infer_chatbot_fallback(latest_message) or classification
+        if classification['needs_safety_review']:
+            return jsonify({
+                'reply': 'This may involve harassment or campus safety. I cannot notify responders automatically. If anyone is in immediate danger, contact campus security or emergency services directly.',
+                **classification,
+            })
+
+        reply = generate_chatbot_reply(clean_messages, classification['category'])
+    except Exception:
+        app.logger.exception('Generative grievance assistant is unavailable')
+        return jsonify({'error': 'The local generative assistant is unavailable. Start Ollama and ensure the configured model is installed.'}), 503
+
+    return jsonify({'reply': reply, **classification})
 
 
 @app.route('/complaint_status', methods=['POST'])
@@ -660,16 +1074,19 @@ def update_status(complaint_id):
         return redirect(url_for('login'))
 
     new_status = request.form.get('status')
+    notification_sent = None
     for c in complaints_db:
         if c['id'] == complaint_id:
             previous_status = c.get('status')
             c['status'] = new_status
             persist_state()
             if previous_status != new_status:
-                send_status_update_notification(c, previous_status, new_status)
+                notification_sent = send_status_update_notification(c, previous_status, new_status)
             break
 
     flash(f'Grievance #{complaint_id} status updated to {new_status}.', 'success')
+    if notification_sent is False:
+        flash('The status was saved, but the student email could not be sent. Check the mail server configuration.', 'danger')
     return redirect(url_for('staff_dashboard'))
 
 # Added to handle administrator link referenced in index.html
@@ -735,6 +1152,30 @@ def update_user_role(username):
         users_db[username]['department'] = request.form.get('department', users_db[username].get('department', 'Academic Affairs'))
         persist_state()
         flash(f'User {username} updated successfully.', 'success')
+
+    return redirect(url_for('administrator'))
+
+
+@app.route('/administrator/reset_password/<username>', methods=['POST'])
+def reset_user_password(username):
+    if 'username' not in session or session.get('role') != 'admin':
+        return redirect(url_for('login'))
+
+    user = users_db.get(username)
+    new_password = request.form.get('new_password', '')
+    confirm_password = request.form.get('confirm_password', '')
+
+    if user is None:
+        flash(f'User {username} was not found.', 'danger')
+    elif len(new_password) < 8:
+        flash('Passwords must be at least 8 characters long.', 'danger')
+    elif new_password != confirm_password:
+        flash('The password confirmation does not match.', 'danger')
+    else:
+        user['password'] = new_password
+        user['password_reset_token_version'] = uuid.uuid4().hex
+        persist_state()
+        flash(f'Password reset for {username}. Share the new password with the user directly.', 'success')
 
     return redirect(url_for('administrator'))
 

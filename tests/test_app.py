@@ -4,8 +4,13 @@ import pytest
 
 from app import app
 
+# These tests exercise the Flask routes and data handling for the grievance portal.
+# They intentionally use lightweight in-memory fakes for MySQL so the app logic can be validated
+# without depending on a live database service during CI or local development.
+
 
 class FakeEvidenceCursor:
+    # Simulates a very small database cursor for evidence uploads and file retrieval.
     def __init__(self, rows):
         self.rows = rows
         self.result = None
@@ -39,6 +44,7 @@ class FakeEvidenceCursor:
 
 
 class FakeEvidenceConnection:
+    # Minimal connection mock that returns the fake cursor used in evidence persistence tests.
     def __init__(self, rows):
         self.rows = rows
 
@@ -57,6 +63,7 @@ class FakeEvidenceConnection:
 
 @pytest.fixture(autouse=True)
 def evidence_database(monkeypatch):
+    # Each test gets an isolated in-memory evidence store so uploads and downloads can be checked.
     import app as app_module
 
     rows = {}
@@ -66,6 +73,7 @@ def evidence_database(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def test_student_account():
+    # Ensure a known student account exists for routes that depend on a logged-in session.
     import app as app_module
 
     original = app_module.users_db.get('student1')
@@ -100,6 +108,7 @@ def test_load_environment_file_reads_dotenv_without_python_dotenv(tmp_path, monk
 
 @pytest.fixture
 def client():
+    # Common client for tests that behave like a logged-in student in the portal.
     app.config['TESTING'] = True
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -119,8 +128,8 @@ def test_application_defaults_do_not_seed_demo_accounts_or_complaints():
 def test_home_page_route_exists():
     response = app.test_client().get('/home')
 
-    assert response.status_code == 200
-    assert b'UNIZULU Portal' in response.data
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/'
 
 
 def test_student_submission_stores_evidence_in_database(client, tmp_path, monkeypatch, evidence_database):
@@ -319,6 +328,41 @@ def test_action_prompt_with_low_classifier_confidence_starts_submission_flow(cli
     assert response.get_json()['confidence'] is None
 
 
+def test_generate_chatbot_reply_uses_faster_local_ollama_settings(monkeypatch):
+    import json
+    import app as app_module
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return b'{"message":{"content":"I can help with that."}}'
+
+    def fake_urlopen(request, timeout):
+        captured['request'] = request
+        captured['timeout'] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+    monkeypatch.setenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    monkeypatch.setenv('OLLAMA_MODEL', 'test-model')
+
+    app_module.generate_chatbot_reply(
+        [{'role': 'user', 'content': 'The WiFi in my residence keeps disconnecting.'}],
+        'ICT',
+    )
+
+    request_data = json.loads(captured['request'].data.decode('utf-8'))
+    assert request_data['options']['num_ctx'] == 768
+    assert request_data['options']['num_predict'] == 64
+
+
 def test_safety_keyword_escalation_does_not_call_generator(client, monkeypatch):
     import app as app_module
 
@@ -379,8 +423,8 @@ def test_generate_chatbot_reply_uses_configured_local_ollama_api(monkeypatch):
     assert request_data['messages'][0]['role'] == 'system'
     assert 'ICT' in request_data['messages'][0]['content']
     assert request_data['messages'][1]['role'] == 'user'
-    assert request_data['options']['num_ctx'] == 1024
-    assert request_data['options']['num_predict'] == 96
+    assert request_data['options']['num_ctx'] == 768
+    assert request_data['options']['num_predict'] == 64
 
 
 def test_generative_chatbot_validates_history_and_bypasses_ai_for_safety(client, monkeypatch):
@@ -405,7 +449,9 @@ def test_generative_chatbot_validates_history_and_bypasses_ai_for_safety(client,
     assert invalid_response.status_code == 400
     assert response.status_code == 200
     assert response.get_json()['needs_safety_review'] is True
-    assert 'campus security' in response.get_json()['reply'].lower()
+    reply = response.get_json()['reply'].lower()
+    assert 'campus security' in reply
+    assert '035 902 6000' in reply
 
 
 def test_student_chatbot_classifier_routes_and_escalates_safety(client):
@@ -656,6 +702,34 @@ def test_staff_dashboard_routes_legacy_general_complaints_to_academic_affairs():
         assert 'General complaint for all staff' in academic_html
     finally:
         complaints_db[:] = [entry for entry in complaints_db if entry.get('id') not in {9981, 9982}]
+
+
+def test_admin_analytics_include_withdrawn_status():
+    import app as app_module
+
+    original = list(app_module.complaints_db)
+    app_module.complaints_db[:] = [
+        {'id': 1, 'status': 'Withdrawn'},
+        {'id': 2, 'status': 'Pending'},
+    ]
+
+    try:
+        analytics = app_module.build_admin_analytics()
+        assert analytics['status_counts']['Withdrawn'] == 1
+        assert analytics['status_counts']['Pending'] == 1
+
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session['username'] = 'admin1'
+            session['role'] = 'admin'
+            session['full_name'] = 'System Administrator'
+
+        response = client.get('/administrator')
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert 'Withdrawn' in html
+    finally:
+        app_module.complaints_db[:] = original
 
 
 def test_admin_can_manage_users_departments_and_categories():

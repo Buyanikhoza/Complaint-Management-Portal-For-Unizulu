@@ -26,6 +26,7 @@
           {% endif %}
         {% endwith %}
 
+        <!-- Show system health and report actions. -->
         <div class="card">
             <h3>System Status & ML Model Overview</h3>
             <p><strong>Machine Learning Classifier:</strong> <span class="status-active">Active (TF-IDF + Naive Bayes / SVM)</span></p>
@@ -61,6 +62,7 @@
             {% endif %}
         </div>
 
+        <!-- Summarize grievance totals and category/status analytics. -->
         <div class="card">
             <h3>Complaint Analytics</h3>
             <div class="stats">
@@ -69,6 +71,7 @@
                 <div class="stat-box"><span>In Progress</span><strong>{{ analytics.status_counts.get('In-Progress', 0) }}</strong></div>
                 <div class="stat-box"><span>Rejected</span><strong>{{ analytics.status_counts.get('Rejected', 0) }}</strong></div>
                 <div class="stat-box"><span>Resolved</span><strong>{{ analytics.status_counts.get('Resolved', 0) }}</strong></div>
+                <div class="stat-box"><span>Withdrawn</span><strong>{{ analytics.status_counts.get('Withdrawn', 0) }}</strong></div>
             </div>
 
             <div class="chart-grid">
@@ -104,6 +107,7 @@
             </table>
         </div>
 
+        <!-- Provide account management alongside department and category settings. -->
         <div class="grid">
             <div class="card">
                 <h3>Manage User Accounts</h3>

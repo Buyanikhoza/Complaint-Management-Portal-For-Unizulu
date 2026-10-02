@@ -43,7 +43,7 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    // 3. Confirm action before submitting sensitive forms (e.g., delete/logout)
+    // 3. Confirm logout before navigating away
     const logoutLinks = document.querySelectorAll(".logout-btn");
     logoutLinks.forEach((link) => {
         link.addEventListener("click", function (event) {

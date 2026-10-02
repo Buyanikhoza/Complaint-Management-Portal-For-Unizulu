@@ -18,6 +18,7 @@
           {% endif %}
         {% endwith %}
 
+        <!-- Collect the identity and credentials needed to create an account. -->
         <form action="{{ url_for('register') }}" method="POST">
             <div class="form-group">
                 <label>Full Name and Surname</label>

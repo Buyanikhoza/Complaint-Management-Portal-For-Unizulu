@@ -34,6 +34,7 @@
             <a href="{{ url_for('track_status') }}" class="btn btn-secondary">Track Status</a>
         </div>
 
+        <!-- Collect a grievance, required evidence, and anonymity preference. -->
         <h3>Submit a New Grievance</h3>
         <form action="{{ url_for('submit_grievance') }}" method="POST" enctype="multipart/form-data">
             <div class="form-group">
@@ -66,6 +67,7 @@
             <button type="submit" class="btn">Submit Grievance</button>
         </form>
 
+        <!-- Show prior submissions and allow eligible grievances to be withdrawn. -->
         <h3 class="section-heading">My Submitted Grievances</h3>
         <table>
             <thead>
@@ -117,8 +119,10 @@
         </table>
     </div>
 
+    <!-- Expose the latest reference to the assistant without displaying it twice. -->
     <div id="latest-reference" class="is-hidden" data-reference="{{ latest_reference or 'No reference yet' }}"></div>
 
+    <!-- The assistant guides students through status checks and grievance submission. -->
     <button id="chatbot-toggle" class="chatbot-toggle" aria-label="Open grievance assistant" title="Open AI grievance assistant">
         <span class="helper-text">Need help?</span>
         <span class="icon" aria-hidden="true">💬</span>

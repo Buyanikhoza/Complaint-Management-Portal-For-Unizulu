@@ -2,6 +2,7 @@ const statusInput = document.getElementById('status-reference');
 const statusResult = document.getElementById('track-status-result');
 const statusCheckBtn = document.getElementById('status-check-btn');
 
+// Request a complaint's current status and render the response safely as text.
 async function checkComplaintStatus() {
     const referenceNumber = (statusInput.value || '').trim();
     if (!referenceNumber) {
@@ -45,6 +46,7 @@ async function checkComplaintStatus() {
     }
 }
 
+// Support both the button and Enter key for status lookups.
 statusCheckBtn.addEventListener('click', checkComplaintStatus);
 statusInput.addEventListener('keydown', function (event) {
     if (event.key === 'Enter') {

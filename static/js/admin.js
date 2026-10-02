@@ -3,6 +3,7 @@ const statusData = JSON.parse(document.body.dataset.statusCounts);
 const categoryLabels = Object.keys(categoryData);
 const categoryValues = Object.values(categoryData);
 
+// Plot complaint volume for each category.
 new Chart(document.getElementById('categoryChart'), {
     type: 'bar',
     data: {
@@ -22,18 +23,20 @@ new Chart(document.getElementById('categoryChart'), {
     }
 });
 
+// Compare complaint statuses and calculate percentages in tooltip labels.
 new Chart(document.getElementById('statusChart'), {
     type: 'doughnut',
     data: {
-        labels: ['Pending', 'In-Progress', 'Rejected', 'Resolved'],
+        labels: ['Pending', 'In-Progress', 'Rejected', 'Resolved', 'Withdrawn'],
         datasets: [{
             data: [
                 statusData['Pending'] || 0,
                 statusData['In-Progress'] || 0,
                 statusData['Rejected'] || 0,
-                statusData['Resolved'] || 0
+                statusData['Resolved'] || 0,
+                statusData['Withdrawn'] || 0
             ],
-            backgroundColor: ['#f4b942', '#0057b8', '#d9534f', '#2ca66b'],
+            backgroundColor: ['#f4b942', '#0057b8', '#d9534f', '#2ca66b', '#6c757d'],
             borderWidth: 2
         }]
     },

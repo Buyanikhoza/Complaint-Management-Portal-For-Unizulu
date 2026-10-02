@@ -162,6 +162,7 @@ CHATBOT_CATEGORY_MAP = {
     'Residences': 'Facilities / Housing',
 }
 CHATBOT_SAFETY_LABELS = {'Harassment & Protection', 'Campus Security'}
+CHATBOT_EMERGENCY_CONTACT = 'Campus Security: 035 902 6000'
 CHATBOT_CONFIDENCE_THRESHOLD = 0.4
 CHATBOT_SAFETY_KEYWORDS = (
     'harassment', 'harassed', 'bullying', 'bullied', 'threatened', 'threatening',
@@ -180,7 +181,7 @@ CHATBOT_SYSTEM_PROMPT = (
     'Do not claim to submit a grievance, access student records, or check its status; the portal handles those actions separately. '
     'Do not request passwords, student numbers, or unnecessary sensitive details. '
     'If a suggested grievance category is provided, explain it as a suggestion, not a final decision. '
-    'For immediate danger, tell the student to contact campus security or emergency services directly.'
+    f'For immediate danger, tell the student to call {CHATBOT_EMERGENCY_CONTACT} or emergency services immediately.'
 )
 
 
@@ -251,7 +252,7 @@ def generate_chatbot_reply(messages, suggested_category=None):
         'model': os.getenv('OLLAMA_MODEL', 'llama3.2:1b'),
         'messages': [{'role': 'system', 'content': instructions}, *messages],
         'stream': False,
-        'options': {'temperature': 0.4, 'num_ctx': 1024, 'num_predict': 96},
+        'options': {'temperature': 0.2, 'num_ctx': 768, 'num_predict': 64},
     }
     base_url = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/')
     ollama_request = Request(
@@ -480,7 +481,7 @@ def generate_reference_number():
 
 def build_admin_analytics():
     category_counts = {}
-    status_counts = {"Pending": 0, "In-Progress": 0, "Rejected": 0, "Resolved": 0}
+    status_counts = {"Pending": 0, "In-Progress": 0, "Rejected": 0, "Resolved": 0, "Withdrawn": 0}
 
     for complaint in complaints_db:
         category = complaint.get('category', 'Academic')
@@ -513,7 +514,7 @@ def build_admin_analytics():
         'latest_report': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
 
-# Mock Databases for Testing
+# In-memory portal state loaded from the configured data file
 system_roles = ["student", "staff", "admin"]
 users_db, complaints_db, departments, complaint_categories, evidence_files = load_state()
 online_users = {}
@@ -689,7 +690,7 @@ def index_page():
 
 @app.route('/home')
 def home_page():
-    return render_template('home.html')
+    return redirect(url_for('index_page'))
 
 
 @app.route('/email_status')
@@ -1001,7 +1002,10 @@ def chatbot_chat():
             classification = infer_chatbot_fallback(latest_message) or classification
         if classification['needs_safety_review']:
             return jsonify({
-                'reply': 'This may involve harassment or campus safety. I cannot notify responders automatically. If anyone is in immediate danger, contact campus security or emergency services directly.',
+                'reply': (
+                    'This may involve harassment or campus safety. I cannot notify responders automatically. '
+                    f'If anyone is in immediate danger, call {CHATBOT_EMERGENCY_CONTACT} or emergency services immediately.'
+                ),
                 **classification,
             })
 
@@ -1089,7 +1093,7 @@ def update_status(complaint_id):
         flash('The status was saved, but the student email could not be sent. Check the mail server configuration.', 'danger')
     return redirect(url_for('staff_dashboard'))
 
-# Added to handle administrator link referenced in index.html
+# Administrator dashboard route
 @app.route('/administrator')
 def administrator():
     if 'username' not in session or session.get('role') != 'admin':
@@ -1293,7 +1297,7 @@ def generate_report():
     summary_sheet['C7'].font = Font(bold=True)
     summary_sheet['C7'].fill = header_fill
     status_row = 8
-    for status in ['Pending', 'In-Progress', 'Rejected', 'Resolved']:
+    for status in ['Pending', 'In-Progress', 'Rejected', 'Resolved', 'Withdrawn']:
         summary_sheet.cell(row=status_row, column=1, value=status)
         summary_sheet.cell(row=status_row, column=2, value=analytics['status_counts'].get(status, 0))
         summary_sheet.cell(row=status_row, column=3, value=f"{analytics['status_percentages'].get(status, 0)}%")

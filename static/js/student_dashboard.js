@@ -12,6 +12,7 @@ const chatState = { mode: null, category: null, description: null, evidence: nul
 const chatHistory = [];
 let isBusy = false;
 
+// Add a message to the chat and retain it for the assistant conversation.
 function addMessage(type, text) {
     const message = document.createElement('div');
     message.className = `chat-message ${type}`;
@@ -75,6 +76,7 @@ async function submitComplaint() {
     chatbotEvidenceLabel.textContent = 'No evidence selected';
 }
 
+// Handle status lookups and the assistant's guided submission flow.
 async function handleChatInput() {
     if (isBusy) return;
     const value = chatbotInput.value.trim();
@@ -86,6 +88,7 @@ async function handleChatInput() {
     chatbotSend.disabled = true;
 
     try {
+        // Collect evidence and anonymity consent before submitting a grievance.
         if (chatState.mode === 'submit-evidence') {
             const evidence = getSelectedEvidenceFile();
             if (!evidence) {

@@ -8,7 +8,6 @@
 </head>
 <body class="auth-page auth-login">
     <div class="card">
-        <!-- Logo Image Placeholder -->
         <img src="{{ url_for('static', filename='images/logo.png') }}" alt="UNIZULU Logo" class="logo">
         <h2>Grievance Portal Login</h2>
 
@@ -30,6 +29,7 @@
                     <option value="admin">System Administrator</option>
                 </select>
             </div>
+            <!-- JavaScript reveals this field only when staff is selected. -->
             <div class="form-group is-hidden" id="department-group">
                 <label for="department">Department</label>
                 <select name="department" id="department">

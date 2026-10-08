@@ -248,6 +248,327 @@ def test_student_submission_requires_evidence_and_shows_rejection_warning(client
     assert b'Grievance submission failed' in response.data
 
 
+@pytest.mark.parametrize(
+    ('use_tls', 'use_ssl', 'transport'),
+    [(True, False, 'starttls'), (False, True, 'ssl'), (False, False, 'plain')],
+)
+def test_email_notification_uses_configured_smtp_transport(monkeypatch, use_tls, use_ssl, transport):
+    import app as app_module
+
+    calls = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, **kwargs):
+            calls.append(('connect', host, port, kwargs))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def starttls(self, **kwargs):
+            calls.append(('starttls', kwargs))
+
+        def login(self, username, password):
+            calls.append(('login', username, password))
+
+        def send_message(self, message):
+            calls.append(('send', message['To']))
+
+    monkeypatch.setattr(app_module.smtplib, 'SMTP', FakeSMTP)
+    monkeypatch.setattr(app_module.smtplib, 'SMTP_SSL', FakeSMTP)
+    monkeypatch.setattr(app_module, 'EMAIL_HOST', 'smtp.example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_PORT', 465 if use_ssl else 587)
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'mailer@example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_PASSWORD', 'test-only-password')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'mailer@example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_USE_TLS', use_tls)
+    monkeypatch.setattr(app_module, 'EMAIL_USE_SSL', use_ssl)
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 4)
+    monkeypatch.setattr(app_module, 'EMAIL_AUTH_METHOD', 'password')
+
+    assert app_module.send_email_notification('Test subject', 'Test body', ['student@example.test']) is True
+    assert calls[0][0] == 'connect'
+    assert calls[0][3]['timeout'] == 4
+    assert any(call[0] == 'starttls' for call in calls) is use_tls
+
+
+def test_email_notification_rejects_conflicting_tls_modes(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, 'EMAIL_USE_TLS', True)
+    monkeypatch.setattr(app_module, 'EMAIL_USE_SSL', True)
+
+    assert app_module.send_email_notification('Test subject', 'Test body', ['student@example.test']) is False
+
+
+def test_email_notification_uses_outlook_oauth2(monkeypatch):
+    import app as app_module
+
+    calls = []
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def starttls(self, **kwargs):
+            calls.append('starttls')
+
+        def auth(self, mechanism, authobject):
+            calls.append((mechanism, authobject(None)))
+
+        def send_message(self, message):
+            calls.append(('send', message['To']))
+            return {}
+
+    monkeypatch.setattr(app_module.smtplib, 'SMTP', FakeSMTP)
+    monkeypatch.setattr(app_module, 'get_outlook_access_token', lambda: 'test-access-token')
+    monkeypatch.setattr(app_module, 'EMAIL_HOST', 'smtp-mail.outlook.com')
+    monkeypatch.setattr(app_module, 'EMAIL_PORT', 587)
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'sender@outlook.com')
+    monkeypatch.setattr(app_module, 'EMAIL_PASSWORD', None)
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'sender@outlook.com')
+    monkeypatch.setattr(app_module, 'EMAIL_USE_TLS', True)
+    monkeypatch.setattr(app_module, 'EMAIL_USE_SSL', False)
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 4)
+    monkeypatch.setattr(app_module, 'EMAIL_AUTH_METHOD', 'oauth2')
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_CLIENT_ID', 'test-client-id')
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_REFRESH_TOKEN', 'test-refresh-token')
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_TENANT', 'consumers')
+
+    assert app_module.send_email_notification('Test subject', 'Test body', ['student@example.test'])
+    assert 'starttls' in calls
+    mechanism, response = next(call for call in calls if isinstance(call, tuple) and call[0] == 'XOAUTH2')
+    assert mechanism == 'XOAUTH2'
+    assert response == 'user=sender@outlook.com\x01auth=Bearer test-access-token\x01\x01'
+
+
+def test_outlook_access_token_uses_configured_refresh_token(monkeypatch):
+    from urllib.parse import parse_qs
+    import app as app_module
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return b'{"access_token":"test-access-token"}'
+
+    def fake_urlopen(request, timeout):
+        captured['request'] = request
+        captured['timeout'] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(app_module, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_CLIENT_ID', 'test-client-id')
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_REFRESH_TOKEN', 'test-refresh-token')
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_TENANT', 'consumers')
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 8)
+
+    assert app_module.get_outlook_access_token() == 'test-access-token'
+    assert captured['request'].full_url == 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
+    form = parse_qs(captured['request'].data.decode('ascii'))
+    assert form['client_id'] == ['test-client-id']
+    assert form['refresh_token'] == ['test-refresh-token']
+    assert form['scope'] == ['https://outlook.office.com/SMTP.Send offline_access']
+    assert captured['timeout'] == 8
+
+
+def test_outlook_email_status_requires_oauth_credentials(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, 'EMAIL_HOST', 'smtp-mail.outlook.com')
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'sender@outlook.com')
+    monkeypatch.setattr(app_module, 'EMAIL_PASSWORD', None)
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'sender@outlook.com')
+    monkeypatch.setattr(app_module, 'EMAIL_AUTH_METHOD', 'oauth2')
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_CLIENT_ID', None)
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_REFRESH_TOKEN', None)
+    monkeypatch.setattr(app_module, 'EMAIL_OAUTH_TENANT', 'consumers')
+
+    status = app_module.get_email_status()
+
+    assert status['configured'] is False
+    assert 'EMAIL_OAUTH_CLIENT_ID' in status['missing']
+    assert 'EMAIL_OAUTH_REFRESH_TOKEN' in status['missing']
+
+
+def test_user_email_uses_saved_address_and_does_not_guess_missing_addresses(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setitem(app_module.users_db, '240049643', {
+        'role': 'student',
+        'email': 'sazisosithole4@gmail.com',
+    })
+
+    assert app_module.get_user_email('240049643') == 'sazisosithole4@gmail.com'
+    assert app_module.get_user_email('240049644') is None
+
+
+def test_email_notification_logs_authentication_rejection_without_provider_response(monkeypatch, caplog):
+    import app as app_module
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def login(self, username, password):
+            raise app_module.smtplib.SMTPAuthenticationError(535, b'private provider response')
+
+    monkeypatch.setattr(app_module.smtplib, 'SMTP', FakeSMTP)
+    monkeypatch.setattr(app_module, 'EMAIL_HOST', 'smtp.example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_PORT', 587)
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'mailer@example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_PASSWORD', 'test-only-password')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'mailer@example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_USE_TLS', False)
+    monkeypatch.setattr(app_module, 'EMAIL_USE_SSL', False)
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 4)
+    monkeypatch.setattr(app_module, 'EMAIL_AUTH_METHOD', 'password')
+
+    assert app_module.send_email_notification('Test subject', 'Test body', ['student@example.test']) is False
+    assert 'SMTP authentication was rejected (code 535)' in caplog.text
+    assert 'private provider response' not in caplog.text
+    assert 'test-only-password' not in caplog.text
+
+
+def test_email_notification_reports_recipient_refusals(monkeypatch, caplog):
+    import app as app_module
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def login(self, username, password):
+            pass
+
+        def send_message(self, message):
+            return {'student@example.test': (550, b'mailbox unavailable')}
+
+    monkeypatch.setattr(app_module.smtplib, 'SMTP', FakeSMTP)
+    monkeypatch.setattr(app_module, 'EMAIL_HOST', 'smtp.example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_PORT', 587)
+    monkeypatch.setattr(app_module, 'EMAIL_USERNAME', 'mailer@example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_PASSWORD', 'test-only-password')
+    monkeypatch.setattr(app_module, 'EMAIL_FROM', 'mailer@example.test')
+    monkeypatch.setattr(app_module, 'EMAIL_USE_TLS', False)
+    monkeypatch.setattr(app_module, 'EMAIL_USE_SSL', False)
+    monkeypatch.setattr(app_module, 'EMAIL_TIMEOUT', 4)
+    monkeypatch.setattr(app_module, 'EMAIL_AUTH_METHOD', 'password')
+
+    assert app_module.send_email_notification('Test subject', 'Test body', ['student@example.test']) is False
+    assert 'SMTP refused 1 recipient(s)' in caplog.text
+    assert 'student@example.test' not in caplog.text
+
+
+def test_complaint_notification_reports_failure_when_no_email_was_delivered(monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, 'send_email_notification', lambda *args: False)
+
+    assert app_module.send_complaint_notification({
+        'username': 'student1',
+        'full_name': 'Test Student',
+        'reference_number': 'GRV-TEST-1234',
+        'category': 'ICT',
+        'status': 'Pending',
+        'description': 'Test notification delivery.',
+    }) is False
+
+
+def test_complaint_notification_tracks_student_confirmation_separately(monkeypatch):
+    import app as app_module
+
+    def fake_send(subject, body, recipients):
+        return 'New grievance submitted:' in subject
+
+    monkeypatch.setattr(app_module, 'send_email_notification', fake_send)
+
+    assert app_module.send_complaint_notification({
+        'username': 'student1',
+        'full_name': 'Test Student',
+        'reference_number': 'GRV-TEST-1234',
+        'category': 'ICT',
+        'status': 'Pending',
+        'description': 'Test notification delivery.',
+    }) is False
+
+
+def test_chatbot_submission_returns_actionable_json_when_evidence_is_missing(client):
+    response = client.post(
+        '/submit_grievance',
+        data={'description': 'WiFi is failing in the hostel', 'category': 'ICT'},
+        headers={'Accept': 'application/json'},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()['error'].startswith('Evidence is required.')
+
+
+def test_chatbot_submission_reports_database_failure(client, monkeypatch):
+    import app as app_module
+
+    def fail_database_connection():
+        raise RuntimeError('database unavailable')
+
+    monkeypatch.setattr(app_module, 'get_database_connection', fail_database_connection)
+    response = client.post(
+        '/submit_grievance',
+        data={
+            'description': 'WiFi is failing in the hostel',
+            'category': 'ICT',
+            'evidence': (io.BytesIO(b'fake evidence'), 'evidence.pdf'),
+        },
+        headers={'Accept': 'application/json'},
+    )
+
+    assert response.status_code == 503
+    assert 'MySQL database' in response.get_json()['error']
+
+
+def test_chatbot_submission_confirms_saved_grievance_when_email_fails(client, monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, 'send_email_notification', lambda *args: False)
+    response = client.post(
+        '/submit_grievance',
+        data={
+            'description': 'WiFi is failing in the hostel',
+            'category': 'ICT',
+            'evidence': (io.BytesIO(b'fake evidence'), 'evidence.pdf'),
+        },
+        headers={'Accept': 'application/json'},
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()['reference_number'].startswith('GRV-')
+    assert response.get_json()['email_sent'] is False
+
+
 def test_student_dashboard_bot_prompts_for_reference_and_evidence(client):
     response = client.get('/student_dashboard')
     script_response = client.get('/static/js/student_dashboard.js')
@@ -261,6 +582,11 @@ def test_student_dashboard_bot_prompts_for_reference_and_evidence(client):
     assert '/complaint_status' in script
     assert '/submit_grievance' in script
     assert 'Suggested category:' in script
+    assert 'const asksForStatus' in script
+    assert script.index('const asksForStatus') < script.index("chatState.mode === 'submit-anonymous'")
+    assert "chatState.mode === 'submit-evidence' && /^(continue|ready|i am ready|done|next|proceed)$/i.test(value)" in script
+    assert 'I paused your previous grievance draft' in script
+    assert 'resumePausedDraft()' in script
     assert 'choose a category' not in script
 
 
@@ -268,6 +594,33 @@ def test_chatbot_classifier_requires_student_login():
     response = app.test_client().post('/chatbot/classify', json={'message': 'The campus WiFi stopped working'})
 
     assert response.status_code == 401
+
+
+def test_unizulu_search_returns_official_pages(client, monkeypatch):
+    import app as app_module
+
+    app_module.search_unizulu_information.cache_clear()
+    monkeypatch.setattr(
+        app_module,
+        'urlopen',
+        lambda request, timeout: type('Response', (), {
+            '__enter__': lambda self: self,
+            '__exit__': lambda self, *args: None,
+            'read': lambda self: b'[{"title":{"rendered":"Admissions"},"url":"https://www.unizulu.ac.za/admissions/"}]',
+        })(),
+    )
+
+    response = client.post('/chatbot/unizulu-search', json={'query': 'admissions'})
+
+    assert response.status_code == 200
+    assert 'Admissions' in response.get_json()['reply']
+    assert 'https://www.unizulu.ac.za/admissions/' in response.get_json()['reply']
+
+
+def test_unizulu_search_rejects_invalid_query(client):
+    response = client.post('/chatbot/unizulu-search', json={'query': '  '})
+
+    assert response.status_code == 400
 
 
 def test_chatbot_classifier_validates_message_length(client):
@@ -280,7 +633,7 @@ def test_chatbot_classifier_validates_message_length(client):
     assert non_text_response.status_code == 400
 
 
-def test_generative_chatbot_returns_reply_and_category(client, monkeypatch):
+def test_classified_chatbot_returns_fast_reply_without_generative_model(client, monkeypatch):
     import app as app_module
 
     monkeypatch.setattr(
@@ -291,7 +644,7 @@ def test_generative_chatbot_returns_reply_and_category(client, monkeypatch):
     monkeypatch.setattr(
         app_module,
         'generate_chatbot_reply',
-        lambda messages, category: f'I can help with your {category} grievance.',
+        lambda *args: (_ for _ in ()).throw(AssertionError('Classified requests should bypass generation.')),
     )
 
     response = client.post('/chatbot/chat', json={
@@ -301,7 +654,9 @@ def test_generative_chatbot_returns_reply_and_category(client, monkeypatch):
     })
 
     assert response.status_code == 200
-    assert response.get_json()['reply'] == 'I can help with your ICT grievance.'
+    assert response.get_json()['reply'] == (
+        'This may fit the ICT category. I can help you submit it through the guided grievance flow.'
+    )
     assert response.get_json()['category'] == 'ICT'
 
 
@@ -316,7 +671,7 @@ def test_action_prompt_with_low_classifier_confidence_starts_submission_flow(cli
     monkeypatch.setattr(
         app_module,
         'generate_chatbot_reply',
-        lambda messages, category: f'You can submit this under {category}.',
+        lambda *args: (_ for _ in ()).throw(AssertionError('Fallback-classified requests should bypass generation.')),
     )
 
     response = client.post('/chatbot/chat', json={
@@ -359,8 +714,9 @@ def test_generate_chatbot_reply_uses_faster_local_ollama_settings(monkeypatch):
     )
 
     request_data = json.loads(captured['request'].data.decode('utf-8'))
+    assert request_data['keep_alive'] == '10m'
     assert request_data['options']['num_ctx'] == 768
-    assert request_data['options']['num_predict'] == 64
+    assert request_data['options']['num_predict'] == 128
 
 
 def test_safety_keyword_escalation_does_not_call_generator(client, monkeypatch):
@@ -423,8 +779,9 @@ def test_generate_chatbot_reply_uses_configured_local_ollama_api(monkeypatch):
     assert request_data['messages'][0]['role'] == 'system'
     assert 'ICT' in request_data['messages'][0]['content']
     assert request_data['messages'][1]['role'] == 'user'
+    assert request_data['keep_alive'] == '10m'
     assert request_data['options']['num_ctx'] == 768
-    assert request_data['options']['num_predict'] == 64
+    assert request_data['options']['num_predict'] == 128
 
 
 def test_generative_chatbot_validates_history_and_bypasses_ai_for_safety(client, monkeypatch):
@@ -586,11 +943,62 @@ def test_login_requires_role_selection_and_student_dashboard_has_blank_default_c
 def test_admin_options_are_available_in_login_and_register():
     login_response = app.test_client().get('/login')
     register_response = app.test_client().get('/register')
+    admin_client = app.test_client()
+    with admin_client.session_transaction() as session:
+        session['username'] = 'admin1'
+        session['role'] = 'admin'
+    admin_response = admin_client.get('/administrator')
 
     assert login_response.status_code == 200
     assert b'Administrator' in login_response.data
     assert register_response.status_code == 200
     assert b'Administrator' in register_response.data
+    assert b'name="email"' in register_response.data
+    assert b'type="email" name="email" id="email" required maxlength="254" autocomplete="email"' in register_response.data
+    assert admin_response.status_code == 200
+    assert b'Email for updates' in admin_response.data
+
+
+def test_registration_requires_and_persists_valid_email(monkeypatch):
+    import app as app_module
+
+    username = '240088881'
+    monkeypatch.setitem(app_module.app.config, 'TESTING', True)
+    app_module.users_db.pop(username, None)
+    client = app.test_client()
+
+    try:
+        missing_email = client.post('/register', data={
+            'username': username,
+            'full_name': 'Email Test User',
+            'password': 'password123',
+            'role': 'student',
+        }, follow_redirects=True)
+        invalid_email = client.post('/register', data={
+            'username': username,
+            'full_name': 'Email Test User',
+            'password': 'password123',
+            'role': 'student',
+            'email': 'not-an-email',
+        }, follow_redirects=True)
+
+        assert b'valid email address' in missing_email.data.lower()
+        assert b'valid email address' in invalid_email.data.lower()
+        assert username not in app_module.users_db
+
+        success = client.post('/register', data={
+            'username': username,
+            'full_name': 'Email Test User',
+            'password': 'password123',
+            'role': 'student',
+            'email': 'updates@example.com',
+        })
+
+        assert success.status_code == 302
+        assert app_module.users_db[username]['email'] == 'updates@example.com'
+        assert app_module.get_user_email(username) == 'updates@example.com'
+    finally:
+        app_module.users_db.pop(username, None)
 
 
 def test_admin_login_redirects_to_administrator_dashboard():
@@ -603,6 +1011,22 @@ def test_admin_login_redirects_to_administrator_dashboard():
 
     assert response.status_code == 200
     assert b'System Administration Control Panel' in response.data
+
+
+def test_login_page_includes_departments_and_role_specific_validation(client):
+    response = client.get('/login')
+    script_response = client.get('/static/js/login.js')
+
+    assert response.status_code == 200
+    assert script_response.status_code == 200
+    html = response.get_data(as_text=True)
+    script = script_response.get_data(as_text=True)
+    assert 'id="department-group"' in html
+    assert 'value="Academic Affairs"' in html
+    assert 'value="IT Services"' in html
+    assert 'departmentSelect.required = isStaff' in script
+    assert "usernameInput.pattern = '[0-9]{9}'" in script
+    assert "usernameInput.removeAttribute('pattern')" in script
 
 
 def test_staff_login_requires_department_and_filters_complaints():
@@ -741,11 +1165,18 @@ def test_admin_can_manage_users_departments_and_categories():
 
     add_user_response = client.post(
         '/administrator/add_user',
-        data={'username': 'admin_student', 'full_name': 'Ava Smith', 'role': 'student', 'department': 'IT Services'},
+        data={
+            'username': 'admin_student',
+            'full_name': 'Ava Smith',
+            'email': 'ava@example.com',
+            'role': 'student',
+            'department': 'IT Services',
+        },
         follow_redirects=True,
     )
     assert add_user_response.status_code == 200
     assert b'AVA SMITH' in add_user_response.data or b'Ava Smith' in add_user_response.data
+    assert __import__('app').users_db['admin_student']['email'] == 'ava@example.com'
 
     dept_response = client.post('/administrator/add_department', data={'department': 'Psychology'}, follow_redirects=True)
     assert dept_response.status_code == 200
@@ -766,6 +1197,39 @@ def test_admin_can_manage_users_departments_and_categories():
     remove_category_response = client.post('/administrator/remove_category/Admissions', follow_redirects=True)
     assert remove_category_response.status_code == 200
     assert b'removed' in remove_category_response.data.lower()
+
+
+def test_admin_can_add_missing_email_to_existing_user(monkeypatch):
+    import app as app_module
+
+    username = 'legacy_user_email_test'
+    monkeypatch.setitem(app_module.app.config, 'TESTING', True)
+    app_module.users_db[username] = {
+        'password': 'password123',
+        'full_name': 'Legacy User',
+        'role': 'student',
+    }
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session['username'] = 'admin1'
+        session['full_name'] = 'System Administrator'
+        session['role'] = 'admin'
+
+    try:
+        response = client.post(
+            f'/administrator/update_user_role/{username}',
+            data={
+                'email': 'legacy-updates@example.com',
+                'role': 'student',
+                'department': 'Academic Affairs',
+            },
+        )
+
+        assert response.status_code == 302
+        assert app_module.users_db[username]['email'] == 'legacy-updates@example.com'
+        assert app_module.get_user_email(username) == 'legacy-updates@example.com'
+    finally:
+        app_module.users_db.pop(username, None)
 
 
 def test_password_reset_is_admin_only_and_does_not_require_email(monkeypatch):
@@ -829,24 +1293,27 @@ def test_password_reset_is_admin_only_and_does_not_require_email(monkeypatch):
         users_db.pop(username, None)
 
 
-def test_forgot_password_page_uses_student_email_pattern():
+def test_forgot_password_page_explains_saved_email_delivery():
     response = app.test_client().get('/forgot_password')
 
     assert response.status_code == 200
-    assert b'stu.unizulu.ac.za' in response.data
+    assert b'<label for="username">Username</label>' in response.data
+    assert b'pattern="[0-9]{9}"' not in response.data
+    assert b'valid email address on file' in response.data
     assert b'Email Reset Link' in response.data
 
 
-def test_password_reset_email_uses_student_number_and_single_use_token(monkeypatch):
+def test_password_reset_email_uses_saved_email_and_single_use_token(monkeypatch):
     from app import users_db
 
     monkeypatch.setitem(app.config, 'TESTING', True)
-    username = '240099991'
+    username = 'student_reset_user'
     users_db[username] = {
         'password': 'old-password',
         'full_name': 'Email Reset Test',
         'role': 'student',
         'department': 'IT Services',
+        'email': 'password-reset@example.com',
     }
     sent_messages = []
 
@@ -864,8 +1331,8 @@ def test_password_reset_email_uses_student_number_and_single_use_token(monkeypat
             follow_redirects=True,
         )
         assert response.status_code == 200
-        assert b'If that student number is registered' in response.data
-        assert sent_messages[0]['recipients'] == ['240099991@stu.unizulu.ac.za']
+        assert b'If that student account is registered' in response.data
+        assert sent_messages[0]['recipients'] == ['password-reset@example.com']
 
         reset_path = '/reset_password/' + sent_messages[0]['body'].split('/reset_password/', 1)[1].split()[0]
         reset_page = client.get(reset_path)
@@ -886,13 +1353,43 @@ def test_password_reset_email_uses_student_number_and_single_use_token(monkeypat
         sent_messages.clear()
         unknown_response = client.post(
             '/forgot_password',
-            data={'username': '240000000'},
+            data={'username': 'unknown_student'},
             follow_redirects=True,
         )
-        assert b'If that student number is registered' in unknown_response.data
+        assert b'If that student account is registered' in unknown_response.data
         assert sent_messages == []
     finally:
         users_db.pop(username, None)
+
+
+def test_password_reset_does_not_send_when_no_saved_email(client, monkeypatch):
+    import app as app_module
+
+    username = '240088882'
+    app_module.users_db[username] = {
+        'password': 'old-password',
+        'full_name': 'No Email User',
+        'role': 'student',
+    }
+    sent_messages = []
+    monkeypatch.setattr(
+        app_module,
+        'send_email_notification',
+        lambda *args: sent_messages.append(args) or True,
+    )
+
+    try:
+        response = client.post(
+            '/forgot_password',
+            data={'username': username},
+            follow_redirects=True,
+        )
+
+        assert response.status_code == 200
+        assert sent_messages == []
+        assert 'password_reset_token_version' not in app_module.users_db[username]
+    finally:
+        app_module.users_db.pop(username, None)
 
 
 def test_admin_generate_report_downloads_excel_workbook_with_charts_and_tables():
@@ -1152,7 +1649,7 @@ def test_status_update_sends_student_email_notification(monkeypatch):
         complaints_db.remove(complaint)
 
 
-def test_status_update_uses_student_number_email_and_warns_on_delivery_failure(monkeypatch):
+def test_status_update_uses_saved_email_and_warns_on_delivery_failure(monkeypatch):
     from app import complaints_db, users_db
 
     monkeypatch.setitem(app.config, 'TESTING', True)
@@ -1162,7 +1659,7 @@ def test_status_update_uses_student_number_email_and_warns_on_delivery_failure(m
         'password': 'password',
         'full_name': 'Numeric Student',
         'role': 'student',
-        'email': 'outdated@example.com',
+        'email': 'student-updates@gmail.com',
     }
     complaints_db.append({
         'id': complaint_id,
@@ -1195,7 +1692,7 @@ def test_status_update_uses_student_number_email_and_warns_on_delivery_failure(m
         )
 
         assert response.status_code == 200
-        assert sent['recipients'] == ['999888777@stu.unizulu.ac.za']
+        assert sent['recipients'] == ['student-updates@gmail.com']
         assert b'student email could not be sent' in response.data
     finally:
         users_db.pop(username, None)

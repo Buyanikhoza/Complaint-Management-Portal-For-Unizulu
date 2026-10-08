@@ -4,7 +4,10 @@ import mimetypes
 import os
 import uuid
 import smtplib
+import ssl
+import time
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from functools import lru_cache
 from email.message import EmailMessage
@@ -252,7 +255,8 @@ def generate_chatbot_reply(messages, suggested_category=None):
         'model': os.getenv('OLLAMA_MODEL', 'llama3.2:1b'),
         'messages': [{'role': 'system', 'content': instructions}, *messages],
         'stream': False,
-        'options': {'temperature': 0.2, 'num_ctx': 768, 'num_predict': 64},
+        'keep_alive': '10m',
+        'options': {'temperature': 0.2, 'num_ctx': 768, 'num_predict': 128},
     }
     base_url = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/')
     ollama_request = Request(
@@ -271,6 +275,71 @@ def generate_chatbot_reply(messages, suggested_category=None):
     if not reply:
         raise RuntimeError('The local model returned an empty response.')
     return reply
+
+
+@lru_cache(maxsize=128)
+def search_unizulu_information(query, cache_window):
+    del cache_window
+    params = urlencode({
+        'search': query,
+        'per_page': 3,
+        '_fields': 'id,title,url,subtype',
+    })
+    search_request = Request(
+        f'https://www.unizulu.ac.za/wp-json/wp/v2/search?{params}',
+        headers={'Accept': 'application/json'},
+    )
+    try:
+        with urlopen(search_request, timeout=5) as response:
+            results = json.loads(response.read().decode('utf-8'))
+    except (URLError, OSError, ValueError) as error:
+        raise RuntimeError('Official UNIZULU search is temporarily unavailable.') from error
+
+    if not isinstance(results, list):
+        raise RuntimeError('Official UNIZULU search returned an unexpected response.')
+
+    pages = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        url = result.get('url', '')
+        if not isinstance(url, str) or not url.startswith('https://www.unizulu.ac.za/'):
+            continue
+        title = result.get('title')
+        title = title.get('rendered') if isinstance(title, dict) else title
+        if isinstance(title, str) and title.strip():
+            pages.append({'title': title.strip(), 'url': url})
+
+    return pages
+
+
+@app.route('/chatbot/unizulu-search', methods=['POST'])
+def chatbot_unizulu_search():
+    if 'username' not in session or session.get('role') != 'student':
+        return jsonify({'error': 'Please log in as a student to use the grievance assistant.'}), 401
+
+    data = request.get_json(silent=True)
+    query = data.get('query', '').strip() if isinstance(data, dict) and isinstance(data.get('query'), str) else ''
+    if not 3 <= len(query) <= 200:
+        return jsonify({'error': 'Search text must contain 3 to 200 characters.'}), 400
+
+    try:
+        pages = search_unizulu_information(query, int(time.time() // 300))
+    except RuntimeError:
+        app.logger.exception('Official UNIZULU search failed')
+        return jsonify({'error': 'Official UNIZULU information is temporarily unavailable. Please try again shortly.'}), 503
+
+    if not pages:
+        return jsonify({
+            'reply': 'I could not find a matching page on the official UNIZULU website. Try different keywords or contact the relevant university office.',
+            'results': [],
+        })
+
+    links = '\n'.join(f"- {page['title']}: {page['url']}" for page in pages)
+    return jsonify({
+        'reply': f'Here are matching pages from the official UNIZULU website:\n{links}',
+        'results': pages,
+    })
 
 
 def get_staff_department_filter():
@@ -525,6 +594,40 @@ EMAIL_USERNAME = (os.getenv('EMAIL_USERNAME') or '').strip() or None
 EMAIL_PASSWORD = (os.getenv('EMAIL_PASSWORD') or '').strip() or None
 EMAIL_FROM = os.getenv('EMAIL_FROM', 'no-reply@gmail.com')
 EMAIL_USE_TLS = str(os.getenv('EMAIL_USE_TLS', 'true')).lower() == 'true'
+EMAIL_USE_SSL = str(os.getenv('EMAIL_USE_SSL', 'false')).lower() == 'true'
+EMAIL_TIMEOUT = float(os.getenv('EMAIL_TIMEOUT', '10'))
+EMAIL_AUTH_METHOD = os.getenv(
+    'EMAIL_AUTH_METHOD',
+    'oauth2' if EMAIL_HOST.casefold() in {'smtp.outlook.com', 'smtp-mail.outlook.com'} else 'password',
+).strip().casefold()
+EMAIL_OAUTH_CLIENT_ID = (os.getenv('EMAIL_OAUTH_CLIENT_ID') or '').strip() or None
+EMAIL_OAUTH_REFRESH_TOKEN = (os.getenv('EMAIL_OAUTH_REFRESH_TOKEN') or '').strip() or None
+EMAIL_OAUTH_TENANT = (os.getenv('EMAIL_OAUTH_TENANT') or 'consumers').strip()
+
+
+def get_outlook_access_token():
+    token_url = f'https://login.microsoftonline.com/{EMAIL_OAUTH_TENANT}/oauth2/v2.0/token'
+    token_request = Request(
+        token_url,
+        data=urlencode({
+            'client_id': EMAIL_OAUTH_CLIENT_ID,
+            'grant_type': 'refresh_token',
+            'refresh_token': EMAIL_OAUTH_REFRESH_TOKEN,
+            'scope': 'https://outlook.office.com/SMTP.Send offline_access',
+        }).encode('ascii'),
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        method='POST',
+    )
+    try:
+        with urlopen(token_request, timeout=EMAIL_TIMEOUT) as response:
+            token_data = json.loads(response.read().decode('utf-8'))
+    except (URLError, OSError, ValueError) as error:
+        raise RuntimeError('Unable to obtain an Outlook access token.') from error
+
+    access_token = token_data.get('access_token')
+    if not isinstance(access_token, str) or not access_token:
+        raise RuntimeError('Microsoft did not return an Outlook access token.')
+    return access_token
 
 
 def get_email_status():
@@ -533,13 +636,31 @@ def get_email_status():
         'EMAIL_HOST': EMAIL_HOST,
         'EMAIL_PORT': EMAIL_PORT,
         'EMAIL_USERNAME': EMAIL_USERNAME,
-        'EMAIL_PASSWORD': EMAIL_PASSWORD,
         'EMAIL_FROM': EMAIL_FROM,
     }.items():
-        if key in {'EMAIL_PORT', 'EMAIL_FROM'}:
+        if key == 'EMAIL_PORT':
             continue
         if not value:
             missing.append(key)
+
+    if EMAIL_AUTH_METHOD == 'password' and not EMAIL_PASSWORD:
+        missing.append('EMAIL_PASSWORD')
+    elif EMAIL_AUTH_METHOD == 'oauth2':
+        if not EMAIL_OAUTH_CLIENT_ID:
+            missing.append('EMAIL_OAUTH_CLIENT_ID')
+        if not EMAIL_OAUTH_REFRESH_TOKEN:
+            missing.append('EMAIL_OAUTH_REFRESH_TOKEN')
+        if not EMAIL_OAUTH_TENANT:
+            missing.append('EMAIL_OAUTH_TENANT')
+    elif EMAIL_AUTH_METHOD != 'password':
+        missing.append('EMAIL_AUTH_METHOD')
+
+    if not 1 <= EMAIL_PORT <= 65535:
+        missing.append('EMAIL_PORT')
+    if EMAIL_TIMEOUT <= 0:
+        missing.append('EMAIL_TIMEOUT')
+    if EMAIL_USE_TLS and EMAIL_USE_SSL:
+        missing.append('EMAIL_TLS_CONFIGURATION')
 
     return {
         'configured': not missing,
@@ -547,32 +668,48 @@ def get_email_status():
         'host': EMAIL_HOST,
         'from_address': EMAIL_FROM,
         'use_tls': EMAIL_USE_TLS,
+        'use_ssl': EMAIL_USE_SSL,
+        'timeout': EMAIL_TIMEOUT,
+        'auth_method': EMAIL_AUTH_METHOD,
     }
 
 
-def get_user_email(username, role='student'):
+def get_user_email(username):
     user = users_db.get(username, {})
-    if role == 'student':
-        student_number = str(username).strip()
-        if student_number.isdigit() and len(student_number) == 9:
-            return f'{student_number}@stu.unizulu.ac.za'
-    if user.get('email'):
-        return user['email']
-    if role == 'student':
-        student_number = str(username).strip()
-        if student_number and student_number != 'None':
-            return f'{student_number}@stu.unizulu.ac.za'
-        return None
-    return 'support@unizulu.ac.za'
+    return user.get('email') or None
+
+
+def is_valid_email_address(address):
+    if not isinstance(address, str) or len(address) > 254 or any(char.isspace() for char in address):
+        return False
+
+    if address.count('@') != 1:
+        return False
+    local_part, domain = address.rsplit('@', 1)
+    if not local_part or len(local_part) > 64 or not domain or '.' not in domain:
+        return False
+    if local_part.startswith('.') or local_part.endswith('.') or '..' in local_part:
+        return False
+
+    labels = domain.split('.')
+    return all(
+        label
+        and len(label) <= 63
+        and label[0].isalnum()
+        and label[-1].isalnum()
+        and all(char.isalnum() or char == '-' for char in label)
+        for label in labels
+    )
 
 
 def send_email_notification(subject, body, recipients):
-    recipients = [email for email in recipients if email]
+    recipients = list(dict.fromkeys(email for email in recipients if email))
     if not recipients:
-        print('Email notification skipped: no recipients provided.')
+        app.logger.warning('Email notification skipped because it has no recipients.')
         return False
-    if not EMAIL_HOST or not EMAIL_USERNAME or not EMAIL_PASSWORD:
-        print('Email notification skipped: Outlook SMTP credentials not configured. Set EMAIL_HOST, EMAIL_USERNAME, and EMAIL_PASSWORD.')
+    status = get_email_status()
+    if not status['configured']:
+        app.logger.error('Email notification skipped; mail configuration is incomplete or invalid: %s', ', '.join(status['missing']))
         return False
 
     message = EmailMessage()
@@ -582,19 +719,69 @@ def send_email_notification(subject, body, recipients):
     message.set_content(body)
 
     try:
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
+        access_token = get_outlook_access_token() if EMAIL_AUTH_METHOD == 'oauth2' else None
+        if EMAIL_USE_SSL:
+            server_context = smtplib.SMTP_SSL(
+                EMAIL_HOST,
+                EMAIL_PORT,
+                timeout=EMAIL_TIMEOUT,
+                context=ssl.create_default_context(),
+            )
+        else:
+            server_context = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT, timeout=EMAIL_TIMEOUT)
+
+        with server_context as server:
             if EMAIL_USE_TLS:
-                server.starttls()
-            server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-            server.send_message(message)
+                server.starttls(context=ssl.create_default_context())
+            if access_token:
+                auth_string = f'user={EMAIL_USERNAME}\x01auth=Bearer {access_token}\x01\x01'
+                server.auth('XOAUTH2', lambda _challenge: auth_string)
+            else:
+                server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+            refused_recipients = server.send_message(message)
+            if refused_recipients:
+                app.logger.error(
+                    'SMTP refused %d recipient(s); response codes: %s.',
+                    len(refused_recipients),
+                    ', '.join(sorted({str(result[0]) for result in refused_recipients.values()})),
+                )
+                return False
         return True
+    except RuntimeError:
+        app.logger.error('Outlook OAuth access-token acquisition failed; rerun the OAuth setup and verify Microsoft consent.')
+        return False
+    except smtplib.SMTPAuthenticationError as exc:
+        if EMAIL_AUTH_METHOD == 'oauth2':
+            app.logger.error(
+                'Outlook OAuth authentication was rejected (code %s); rerun the OAuth setup and verify delegated SMTP.Send consent.',
+                exc.smtp_code,
+            )
+        else:
+            app.logger.error(
+                'SMTP authentication was rejected (code %s); check EMAIL_USERNAME and EMAIL_PASSWORD.',
+                exc.smtp_code,
+            )
+        return False
+    except smtplib.SMTPRecipientsRefused as exc:
+        response_codes = sorted({str(result[0]) for result in exc.recipients.values()})
+        app.logger.error(
+            'SMTP rejected all recipients (response codes: %s); verify recipient addresses and provider relay policy.',
+            ', '.join(response_codes),
+        )
+        return False
+    except smtplib.SMTPSenderRefused as exc:
+        app.logger.error(
+            'SMTP rejected the sender (code %s); verify EMAIL_FROM is permitted by the provider.',
+            exc.smtp_code,
+        )
+        return False
     except (smtplib.SMTPException, OSError, ValueError) as exc:
-        print(f'Email notification failed: {exc}')
+        app.logger.error('Email delivery failed (%s).', type(exc).__name__)
         return False
 
 
 def send_student_confirmation_email(complaint):
-    student_email = get_user_email(complaint.get('username'), complaint.get('role', 'student'))
+    student_email = get_user_email(complaint.get('username'))
     if not student_email:
         return False
 
@@ -612,9 +799,8 @@ def send_student_confirmation_email(complaint):
 
 
 def send_complaint_notification(complaint):
-    student_email = get_user_email(complaint.get('username'), complaint.get('role', 'student'))
     staff_emails = [
-        get_user_email(username, data.get('role', 'staff'))
+        get_user_email(username)
         for username, data in users_db.items()
         if data.get('role') in {'staff', 'admin'}
     ]
@@ -632,7 +818,9 @@ def send_complaint_notification(complaint):
 
     staff_sent = send_email_notification(staff_subject, staff_body, [email for email in staff_emails if email])
     confirmation_sent = send_student_confirmation_email(complaint)
-    return staff_sent or confirmation_sent or bool(student_email)
+    if not staff_sent:
+        app.logger.warning('New-grievance staff notification was not delivered.')
+    return confirmation_sent
 
 
 def send_status_update_notification(complaint, old_status, new_status):
@@ -747,7 +935,14 @@ def register():
         full_name = (request.form.get('full_name') or '').strip()
         password = request.form.get('password') or ''
         role = request.form.get('role', 'student')
+        email = (request.form.get('email') or '').strip()
 
+        if not username or not full_name or not password:
+            flash('Name, username, and password are required.', 'danger')
+            return render_template('register.html')
+        if not is_valid_email_address(email):
+            flash('Please enter a valid email address for account updates.', 'danger')
+            return render_template('register.html')
         if role == 'student' and (not username.isdigit() or len(username) != 9):
             flash('Student username must be exactly 9 digits.', 'danger')
             return render_template('register.html')
@@ -755,7 +950,12 @@ def register():
         if username in users_db:
             flash('Username already exists.', 'danger')
         else:
-            users_db[username] = {'password': password, 'full_name': full_name, 'role': role}
+            users_db[username] = {
+                'password': password,
+                'full_name': full_name,
+                'role': role,
+                'email': email,
+            }
             persist_state()
             flash('Registration successful! Please log in.', 'success')
             return redirect(url_for('login'))
@@ -769,7 +969,11 @@ def forgot_password():
         username = (request.form.get('username') or '').strip()
         user = users_db.get(username)
 
-        if user and user.get('role') == 'student' and username.isdigit() and len(username) == 9:
+        if (
+            user
+            and user.get('role') == 'student'
+            and is_valid_email_address(user.get('email'))
+        ):
             token_version = uuid.uuid4().hex
             user['password_reset_token_version'] = token_version
             persist_state()
@@ -785,12 +989,12 @@ def forgot_password():
             send_email_notification(
                 'Student portal password reset',
                 message,
-                [f'{username}@stu.unizulu.ac.za'],
+                [user['email']],
             )
 
         flash(
-            'If that student number is registered, the system will attempt to send a reset link to its '
-            '@stu.unizulu.ac.za address. Check spam, and contact a system administrator if no email arrives.',
+            'If that student account is registered and has a valid email address on file, the system will attempt '
+            'to send a reset link there. Check spam, and contact a system administrator if no email arrives.',
             'info',
         )
         return redirect(url_for('forgot_password'))
@@ -888,7 +1092,11 @@ def withdraw_grievance(complaint_id):
 
 @app.route('/submit_grievance', methods=['POST'])
 def submit_grievance():
+    wants_json = request.accept_mimetypes.best == 'application/json'
+
     if 'username' not in session:
+        if wants_json:
+            return jsonify({'error': 'Please log in as a student to submit a grievance.'}), 401
         return redirect(url_for('login'))
 
     description = (request.form.get('description') or '').strip()
@@ -897,11 +1105,16 @@ def submit_grievance():
     evidence_file = request.files.get('evidence')
 
     if not description:
+        if wants_json:
+            return jsonify({'error': 'Please provide a description for your grievance.'}), 400
         flash('Please provide a description for your grievance.', 'danger')
         return redirect(url_for('student_dashboard'))
 
     if not evidence_file or not evidence_file.filename:
-        flash('Grievance submission failed: evidence is required. Failure to submit supporting evidence may lead to rejection of your grievance.', 'danger')
+        message = 'Evidence is required. Failure to submit supporting evidence may lead to rejection of your grievance.'
+        if wants_json:
+            return jsonify({'error': message}), 400
+        flash(f'Grievance submission failed: {message}', 'danger')
         return redirect(url_for('student_dashboard'))
 
     new_id = max((int(item.get('id', 0)) for item in complaints_db), default=0) + 1
@@ -910,7 +1123,10 @@ def submit_grievance():
         evidence_metadata = save_uploaded_evidence(evidence_file, new_id)
     except Exception:
         app.logger.exception('Unable to store grievance evidence in MySQL')
-        flash('Grievance submission failed: evidence could not be saved to the database. Check the MySQL configuration and try again.', 'danger')
+        message = 'Evidence could not be saved. Please check that the MySQL database is configured and available, then try again.'
+        if wants_json:
+            return jsonify({'error': message}), 503
+        flash(f'Grievance submission failed: {message}', 'danger')
         return redirect(url_for('student_dashboard'))
 
     reference_number = generate_reference_number()
@@ -931,9 +1147,13 @@ def submit_grievance():
     evidence_files.append(evidence_metadata)
     persist_state()
 
-    send_complaint_notification(complaint)
+    email_sent = send_complaint_notification(complaint)
 
     session['last_reference_number'] = reference_number
+    if wants_json:
+        return jsonify({'reference_number': reference_number, 'email_sent': email_sent}), 201
+    if not email_sent:
+        flash('Your grievance was saved, but the confirmation email could not be sent. Contact support if you need help.', 'warning')
     flash(f'Grievance submitted successfully! Reference number: {reference_number}', 'success')
     return redirect(url_for('student_dashboard'))
 
@@ -1009,7 +1229,13 @@ def chatbot_chat():
                 **classification,
             })
 
-        reply = generate_chatbot_reply(clean_messages, classification['category'])
+        if classification['category']:
+            reply = (
+                f"This may fit the {classification['category']} category. "
+                'I can help you submit it through the guided grievance flow.'
+            )
+        else:
+            reply = generate_chatbot_reply(clean_messages)
     except Exception:
         app.logger.exception('Generative grievance assistant is unavailable')
         return jsonify({'error': 'The local generative assistant is unavailable. Start Ollama and ensure the configured model is installed.'}), 503
@@ -1105,7 +1331,8 @@ def administrator():
             "username": username,
             "full_name": data["full_name"],
             "role": data.get("role", "student"),
-            "department": data.get("department", "General")
+            "department": data.get("department", "General"),
+            "email": data.get("email", ""),
         }
         for username, data in users_db.items()
     ]
@@ -1128,20 +1355,26 @@ def add_user():
 
     username = request.form.get('username', '').strip()
     full_name = request.form.get('full_name', '').strip()
+    email = (request.form.get('email') or '').strip()
     role = request.form.get('role', 'student')
     department = request.form.get('department', 'Academic Affairs')
 
-    if username and full_name:
+    if not username or not full_name:
+        flash('Username and full name are required.', 'danger')
+    elif not is_valid_email_address(email):
+        flash('Please enter a valid email address for the new user.', 'danger')
+    elif username in users_db:
+        flash(f'User {username} already exists.', 'danger')
+    else:
         users_db[username] = {
             'password': request.form.get('password', '123'),
             'full_name': full_name,
             'role': role,
-            'department': department
+            'department': department,
+            'email': email,
         }
         persist_state()
         flash(f'User {full_name} added successfully.', 'success')
-    else:
-        flash('Username and full name are required.', 'danger')
 
     return redirect(url_for('administrator'))
 
@@ -1152,6 +1385,11 @@ def update_user_role(username):
         return redirect(url_for('login'))
 
     if username in users_db:
+        email = (request.form.get('email') or '').strip()
+        if not is_valid_email_address(email):
+            flash('Please enter a valid email address for this user.', 'danger')
+            return redirect(url_for('administrator'))
+        users_db[username]['email'] = email
         users_db[username]['role'] = request.form.get('role', users_db[username].get('role', 'student'))
         users_db[username]['department'] = request.form.get('department', users_db[username].get('department', 'Academic Affairs'))
         persist_state()

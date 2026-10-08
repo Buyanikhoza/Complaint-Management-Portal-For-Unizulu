@@ -123,6 +123,10 @@
                             <input type="text" name="username" placeholder="ava123" required>
                         </div>
                         <div class="field-group">
+                            <label>Email for updates</label>
+                            <input type="email" name="email" maxlength="254" placeholder="ava@example.com" required>
+                        </div>
+                        <div class="field-group">
                             <label>Role</label>
                             <select name="role">
                                 {% for role in roles %}
@@ -155,6 +159,7 @@
                         <tr>
                             <th>Username</th>
                             <th>Full Name</th>
+                            <th>Email</th>
                             <th>Role</th>
                             <th>Department</th>
                         </tr>
@@ -165,21 +170,25 @@
                             <td>{{ user.username }}</td>
                             <td>{{ user.full_name|upper }}</td>
                             <td>
-                                <form action="{{ url_for('update_user_role', username=user.username) }}" method="POST">
-                                    <select name="role">
-                                        {% for role in roles %}
-                                        <option value="{{ role }}" {% if role == user.role %}selected{% endif %}>{{ role|title }}</option>
-                                        {% endfor %}
-                                    </select>
+                                <form id="update-user-{{ loop.index }}" action="{{ url_for('update_user_role', username=user.username) }}" method="POST">
+                                    <label for="user-email-{{ loop.index }}">Email for updates</label>
+                                    <input id="user-email-{{ loop.index }}" type="email" name="email" value="{{ user.email }}" maxlength="254" required>
+                                </form>
                             </td>
                             <td>
-                                    <select name="department">
-                                        {% for department in departments %}
-                                        <option value="{{ department }}" {% if department == user.department %}selected{% endif %}>{{ department }}</option>
-                                        {% endfor %}
-                                    </select>
-                                    <button type="submit" class="small-btn mt-8">Update</button>
-                                </form>
+                                <select name="role" form="update-user-{{ loop.index }}">
+                                    {% for role in roles %}
+                                    <option value="{{ role }}" {% if role == user.role %}selected{% endif %}>{{ role|title }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <select name="department" form="update-user-{{ loop.index }}">
+                                    {% for department in departments %}
+                                    <option value="{{ department }}" {% if department == user.department %}selected{% endif %}>{{ department }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" form="update-user-{{ loop.index }}" class="small-btn mt-8">Update</button>
                                 <form action="{{ url_for('remove_user', username=user.username) }}" method="POST" class="form-spaced">
                                     <button type="submit" class="small-btn danger-action">Remove User</button>
                                 </form>
@@ -192,7 +201,7 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="4">No users registered yet.</td></tr>
+                        <tr><td colspan="5">No users registered yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

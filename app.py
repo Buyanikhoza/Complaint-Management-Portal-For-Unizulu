@@ -362,16 +362,19 @@ def filter_complaints_for_staff():
     return filtered
 
 
+import os
+import mysql.connector
+
 def get_database_connection():
     database_config = {
         'host': os.getenv('MYSQL_HOST'),
         'port': int(os.getenv('MYSQL_PORT', '3306')),
         'user': os.getenv('MYSQL_USER'),
         'password': os.getenv('MYSQL_PASSWORD', ''),
-        'database': os.getenv('MYSQL_DATABASE'),
+        'database': os.getenv('MYSQL_DATABASE') or os.getenv('MYSQL_DB'), # Checks both names just in case!
     }
     if not database_config['host'] or not database_config['user'] or not database_config['database']:
-        raise RuntimeError('Set MYSQL_HOST, MYSQL_USER, and MYSQL_DATABASE in .env before submitting evidence.')
+        raise RuntimeError('Set MYSQL_HOST, MYSQL_USER, and MYSQL_DATABASE in environment variables before submitting evidence.')
 
     try:
         import mysql.connector
@@ -380,6 +383,62 @@ def get_database_connection():
 
     return mysql.connector.connect(**database_config)
 
+# --- ADD THIS FUNCTION TO AUTO-CREATE TABLES ON STARTUP ---
+def init_db():
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # 1. Users Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(100) NOT NULL UNIQUE,
+                email VARCHAR(150) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                role ENUM('student', 'staff', 'admin') NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 2. Complaints Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS complaints (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                description TEXT NOT NULL,
+                assigned_category VARCHAR(100) DEFAULT 'Unassigned',
+                status ENUM('Pending', 'In Progress', 'Resolved', 'Closed') DEFAULT 'Pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # 3. Evidence Files Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evidence_files (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                complaint_id INT NULL,
+                original_filename VARCHAR(255) NOT NULL,
+                stored_filename VARCHAR(255) NOT NULL UNIQUE,
+                stored_path VARCHAR(500) NOT NULL,
+                mime_type VARCHAR(127) NOT NULL,
+                size_bytes BIGINT UNSIGNED NOT NULL,
+                file_data LONGBLOB NOT NULL,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("Database tables verified/created successfully!")
+    except Exception as e:
+        print(f"Database initialization note: {e}")
+
+# Run table creation when app starts
+init_db()
 
 def migrate_legacy_evidence():
     if not os.path.isdir(UPLOAD_FOLDER):

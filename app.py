@@ -372,6 +372,7 @@ def get_database_connection():
         'user': os.getenv('MYSQL_USER'),
         'password': os.getenv('MYSQL_PASSWORD', ''),
         'database': os.getenv('MYSQL_DATABASE') or os.getenv('MYSQL_DB'), # Checks both names just in case!
+        'ssl_disabled': False, #Ensure SSL is active
     }
     if not database_config['host'] or not database_config['user'] or not database_config['database']:
         raise RuntimeError('Set MYSQL_HOST, MYSQL_USER, and MYSQL_DATABASE in environment variables before submitting evidence.')
